@@ -1,9 +1,10 @@
 
--- Enable UUID extension
-create extension if not exists "uuid-ossp";
+-- 1. EXTENSIONS & SEARCH PATH
+create extension if not exists "uuid-ossp" with schema extensions;
+grant usage on schema extensions to anon, authenticated;
 
--- 1. Profiles
-create table profiles (
+-- 2. CORE TABLES
+create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
   full_name text,
   country text default 'Nigeria',
@@ -12,10 +13,18 @@ create table profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 2. Tasks
-create table tasks (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references profiles(id) on delete cascade not null,
+create table if not exists public.subscriptions (
+  id uuid default extensions.uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  plan text not null default 'free',
+  status text not null default 'active',
+  current_period_end timestamp with time zone,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+create table if not exists public.tasks (
+  id uuid default extensions.uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
   title text not null,
   description text,
   due_at timestamp with time zone,
@@ -26,10 +35,9 @@ create table tasks (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 3. Events
-create table events (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references profiles(id) on delete cascade not null,
+create table if not exists public.events (
+  id uuid default extensions.uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
   title text not null,
   description text,
   start_at timestamp with time zone not null,
@@ -39,92 +47,102 @@ create table events (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 4. Notes
-create table notes (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references profiles(id) on delete cascade not null,
+create table if not exists public.notes (
+  id uuid default extensions.uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
   title text not null,
   content text not null,
   tags text[],
-  scheduled_at timestamp with time zone, -- Added time for notes
+  scheduled_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 5. Reminders
-create table reminders (
-  id uuid default uuid_generate_v4() primary key,
-  user_id references profiles(id) on delete cascade not null,
-  type text check (type in ('task', 'event', 'custom')) not null,
-  reference_id uuid,
-  remind_at timestamp with time zone not null,
-  status text check (status in ('scheduled', 'sent', 'cancelled')) default 'scheduled',
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- 6. Drafts
-create table drafts (
-  id uuid default uuid_generate_v4() primary key,
-  user_id references profiles(id) on delete cascade not null,
-  channel text check (channel in ('email', 'message')) not null,
-  recipient text,
-  subject text,
-  body text not null,
-  status text check (status in ('draft', 'approved', 'cancelled')) default 'draft',
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- 7. Assistant Actions (Audit Log)
-create table assistant_actions (
-  id uuid default uuid_generate_v4() primary key,
-  user_id references profiles(id) on delete cascade not null,
+create table if not exists public.assistant_actions (
+  id uuid default extensions.uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
   action_type text not null,
   input_payload jsonb,
   result_payload jsonb,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 8. Subscriptions
-create table subscriptions (
-  id uuid default uuid_generate_v4() primary key,
-  user_id references profiles(id) on delete cascade not null,
-  provider text check (provider in ('paystack', 'paypal')),
-  plan text check (plan in ('pro')) default 'pro',
-  status text check (status in ('active', 'inactive', 'cancelled')) default 'active',
-  current_period_end timestamp with time zone,
+create table if not exists public.drafts (
+  id uuid default extensions.uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete cascade not null,
+  channel text not null,
+  recipient text,
+  subject text,
+  body text not null,
+  status text default 'draft',
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- 9. Payments
-create table payments (
-  id uuid default uuid_generate_v4() primary key,
-  user_id references profiles(id) on delete cascade not null,
-  provider text check (provider in ('paystack', 'paypal')) not null,
-  reference text unique not null,
-  amount integer not null,
-  currency text not null,
-  status text check (status in ('pending', 'success', 'failed')) default 'pending',
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+-- 3. PERMISSIONS & RLS
+alter table public.profiles enable row level security;
+alter table public.subscriptions enable row level security;
+alter table public.tasks enable row level security;
+alter table public.events enable row level security;
+alter table public.notes enable row level security;
+alter table public.assistant_actions enable row level security;
+alter table public.drafts enable row level security;
 
--- Enable RLS
-alter table profiles enable row level security;
-alter table tasks enable row level security;
-alter table events enable row level security;
-alter table notes enable row level security;
-alter table reminders enable row level security;
-alter table drafts enable row level security;
-alter table assistant_actions enable row level security;
-alter table subscriptions enable row level security;
-alter table payments enable row level security;
+-- Global grants
+grant usage on schema public to anon, authenticated;
+grant all on all tables in schema public to authenticated;
+grant all on all sequences in schema public to authenticated;
 
--- RLS Policies
-create policy "Owner can access profile" on profiles for all using (auth.uid() = id);
-create policy "Owner can access tasks" on tasks for all using (auth.uid() = user_id);
-create policy "Owner can access events" on events for all using (auth.uid() = user_id);
-create policy "Owner can access notes" on notes for all using (auth.uid() = user_id);
-create policy "Owner can access reminders" on reminders for all using (auth.uid() = user_id);
-create policy "Owner can access drafts" on drafts for all using (auth.uid() = user_id);
-create policy "Owner can access assistant_actions" on assistant_actions for all using (auth.uid() = user_id);
-create policy "Owner can access subscriptions" on subscriptions for all using (auth.uid() = user_id);
-create policy "Owner can access payments" on payments for all using (auth.uid() = user_id);
+-- RLS Policies (Idempotent)
+do $$ 
+begin
+  if not exists (select 1 from pg_policies where tablename = 'profiles' and policyname = 'Users can access own profile') then
+    create policy "Users can access own profile" on public.profiles for all using (auth.uid() = id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'subscriptions' and policyname = 'Users can access own subscriptions') then
+    create policy "Users can access own subscriptions" on public.subscriptions for all using (auth.uid() = user_id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'tasks' and policyname = 'Users can access own tasks') then
+    create policy "Users can access own tasks" on public.tasks for all using (auth.uid() = user_id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'events' and policyname = 'Users can access own events') then
+    create policy "Users can access own events" on public.events for all using (auth.uid() = user_id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'notes' and policyname = 'Users can access own notes') then
+    create policy "Users can access own notes" on public.notes for all using (auth.uid() = user_id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'assistant_actions' and policyname = 'Users can access own actions') then
+    create policy "Users can access own actions" on public.assistant_actions for all using (auth.uid() = user_id);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'drafts' and policyname = 'Users can access own drafts') then
+    create policy "Users can access own drafts" on public.drafts for all using (auth.uid() = user_id);
+  end if;
+end $$;
+
+-- 4. ATOMIC AUTH TRIGGER
+create or replace function public.handle_new_user()
+returns trigger 
+language plpgsql 
+security definer 
+set search_path = public, auth, extensions
+as $$
+begin
+  insert into public.profiles (id, full_name, plan)
+  values (
+    new.id, 
+    coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', 'New User'), 
+    'free'
+  )
+  on conflict (id) do nothing;
+
+  insert into public.subscriptions (user_id, plan, status)
+  values (new.id, 'free', 'active')
+  on conflict do nothing;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();

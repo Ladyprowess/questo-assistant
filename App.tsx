@@ -4,7 +4,6 @@ import { ICONS, COLORS } from './constants';
 import { Task, CalendarEvent, Note, AssistantAction, Draft } from './types';
 import { supabase, isSupabaseConfigured, saveSupabaseConfig } from './services/supabase';
 
-
 // Screens
 import ChatScreen from './screens/ChatScreen';
 import TodayScreen from './screens/TodayScreen';
@@ -15,8 +14,8 @@ import SettingsScreen from './screens/SettingsScreen';
 import PaywallScreen from './screens/PaywallScreen';
 import AuditLogScreen from './screens/AuditLogScreen';
 import DraftsScreen from './screens/DraftsScreen';
-import LandingScreen from "./screens/LandingScreen";
-import PrivacyScreen from "./screens/PrivacyScreen";
+import LandingScreen from './screens/LandingScreen';
+import PrivacyScreen from './screens/PrivacyScreen';
 
 export const COUNTRY_TIMEZONES: Record<string, string> = {
   Nigeria: 'Africa/Lagos',
@@ -35,15 +34,7 @@ export const COUNTRY_TIMEZONES: Record<string, string> = {
 
 /**
  * ---------- TIME HELPERS (FIXES 5PM -> 4PM DRIFT) ----------
- * The drift happens when:
- * - datetime-local has NO timezone
- * - toISOString() converts to UTC (Z) and shifts the hour
- *
- * Fix:
- * - Keep local wall-clock time and store ISO with numeric offset (+01:00 etc)
- * - Display with user's chosen timezone
  */
-
 const getUserTimeZone = () => {
   try {
     const tz =
@@ -63,7 +54,6 @@ const getUserTimeZone = () => {
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 const toISOWithOffset = (d: Date) => {
-  // Example: 2026-02-01T17:00:00+01:00
   const yyyy = d.getFullYear();
   const mm = pad2(d.getMonth() + 1);
   const dd = pad2(d.getDate());
@@ -71,7 +61,6 @@ const toISOWithOffset = (d: Date) => {
   const mi = pad2(d.getMinutes());
   const ss = pad2(d.getSeconds());
 
-  // getTimezoneOffset: minutes behind UTC (Nigeria is -60)
   const offsetMin = -d.getTimezoneOffset();
   const sign = offsetMin >= 0 ? '+' : '-';
   const abs = Math.abs(offsetMin);
@@ -88,37 +77,14 @@ const safeParseDate = (value: string) => {
   return null;
 };
 
-const formatForUI = (value: string | Date, tz: string) => {
-  try {
-    const d = typeof value === 'string' ? new Date(value) : value;
-    if (isNaN(d.getTime())) return '';
-    return new Intl.DateTimeFormat(undefined, {
-      timeZone: tz,
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(d);
-  } catch {
-    try {
-      const d = typeof value === 'string' ? new Date(value) : value;
-      return d.toLocaleString();
-    } catch {
-      return '';
-    }
-  }
-};
-
 /**
  * ---------- UI Notification Builder ----------
- * Better success message quality + consistent tone.
  */
-const buildSuccess = (title: string, body: string) => {
-  return { title, body };
-};
+const buildSuccess = (title: string, body: string) => ({ title, body });
 
-const buildError = (title: string, body: string) => {
-  return { title, body };
-};
-
+/**
+ * ---------- Supabase Config Screen ----------
+ */
 const SupabaseConfigScreen: React.FC = () => {
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
@@ -175,6 +141,10 @@ const SupabaseConfigScreen: React.FC = () => {
   );
 };
 
+/**
+ * ---------- Auth Screen ----------
+ * Small change: add a link to Privacy Policy (important for verification UX)
+ */
 const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) => {
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
@@ -209,7 +179,6 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
 
         if (error) throw error;
 
-        // If email confirmation enabled:
         if (data?.user && !data.session) {
           setSuccessMsg('Account created! Please check your email to confirm your address.');
         } else {
@@ -262,16 +231,8 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
       <p className="text-slate-400 text-sm mb-8 font-medium italic">Your private virtual assistant.</p>
 
       <div className="w-full space-y-4 max-w-sm">
-        {error && (
-          <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-2xl mb-4">
-            {error}
-          </div>
-        )}
-        {successMsg && (
-          <div className="p-4 bg-teal-50 text-teal-700 text-xs font-bold rounded-2xl mb-4">
-            {successMsg}
-          </div>
-        )}
+        {error && <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-2xl mb-4">{error}</div>}
+        {successMsg && <div className="p-4 bg-teal-50 text-teal-700 text-xs font-bold rounded-2xl mb-4">{successMsg}</div>}
 
         <button
           onClick={handleGoogleAuth}
@@ -339,13 +300,210 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
         >
           {isSignup ? 'Already have an account? Login' : 'New to Queso? Join Now'}
         </button>
+
+        {/* Helpful for verification */}
+        <div className="pt-2">
+          <a href="#/privacy" className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">
+            Privacy Policy
+          </a>
+        </div>
       </div>
     </div>
   );
 };
 
+/**
+ * ---------- Route Guards ----------
+ */
+const RequireAuth: React.FC<{ session: any; children: React.ReactNode }> = ({ session, children }) => {
+  if (!session) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+};
+
+const AppShell: React.FC<{
+  profile: any;
+  session: any;
+  tasks: Task[];
+  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
+  events: CalendarEvent[];
+  setEvents: React.Dispatch<React.SetStateAction<CalendarEvent[]>>;
+  notes: Note[];
+  setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
+  drafts: Draft[];
+  setDrafts: React.Dispatch<React.SetStateAction<Draft[]>>;
+  actions: AssistantAction[];
+  addAction: (type: string, input: any, result?: any) => void;
+  silentCalendarSync: (title: string, date: string | null) => void;
+  messages: any[];
+  setMessages: React.Dispatch<React.SetStateAction<any[]>>;
+  fetchAllData: () => void;
+  triggerNotification: (title: string, body: string) => void;
+  notification: { title: string; body: string } | null;
+  isDataLoading: boolean;
+  setProfile: React.Dispatch<React.SetStateAction<any>>;
+  handleSignOut: () => void;
+}> = ({
+  profile,
+  session,
+  tasks,
+  setTasks,
+  events,
+  setEvents,
+  notes,
+  setNotes,
+  drafts,
+  setDrafts,
+  actions,
+  addAction,
+  silentCalendarSync,
+  messages,
+  setMessages,
+  fetchAllData,
+  triggerNotification,
+  notification,
+  isDataLoading,
+  setProfile,
+  handleSignOut,
+}) => {
+  return (
+    <div className="flex flex-col h-screen bg-slate-50 max-w-md mx-auto relative border-x border-slate-200 shadow-2xl overflow-hidden">
+      {notification && (
+        <div className="absolute top-6 left-4 right-4 z-[200] animate-in slide-in-from-top-12 duration-500">
+          <div className="bg-white/95 backdrop-blur-xl border border-slate-200 p-4 rounded-3xl shadow-2xl flex items-center space-x-4">
+            <div className="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center text-white shrink-0">
+              <ICONS.Check className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-xs font-black text-slate-800">{notification.title}</h4>
+              <p className="text-[10px] text-slate-600 line-clamp-2">{notification.body}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="flex-1 overflow-y-auto pb-24 scroll-smooth">
+        <Routes>
+          <Route
+            path="chat"
+            element={
+              <ChatScreen
+                plan={profile?.plan || 'free'}
+                messages={messages}
+                setMessages={setMessages}
+                onClearChat={() => {
+                  setMessages([]);
+                  localStorage.removeItem('queso_chat');
+                }}
+                setTasks={setTasks}
+                setEvents={setEvents}
+                setNotes={setNotes}
+                setDrafts={setDrafts}
+                triggerNotification={(title: string, body: string) => triggerNotification(title, body)}
+                addAction={addAction}
+                syncToCalendar={silentCalendarSync}
+                refreshData={fetchAllData}
+              />
+            }
+          />
+
+          <Route path="today" element={<TodayScreen plan={profile?.plan || 'free'} tasks={tasks} events={events} notes={notes} />} />
+
+          <Route
+            path="tasks"
+            element={
+              <TasksScreen
+                plan={profile?.plan || 'free'}
+                tasks={tasks}
+                setTasks={setTasks}
+                addAction={addAction}
+                syncToCalendar={silentCalendarSync}
+              />
+            }
+          />
+
+          <Route path="calendar" element={<CalendarScreen events={events} setEvents={setEvents} addAction={addAction} />} />
+
+          <Route
+            path="notes"
+            element={
+              <NotesScreen
+                plan={profile?.plan || 'free'}
+                notes={notes}
+                setNotes={setNotes}
+                addAction={addAction}
+                syncToCalendar={silentCalendarSync}
+              />
+            }
+          />
+
+          <Route
+            path="drafts/:id"
+            element={
+              <DraftsScreen
+                plan={profile?.plan || 'free'}
+                drafts={drafts}
+                triggerNotification={triggerNotification}
+                addAction={addAction}
+              />
+            }
+          />
+
+          <Route
+            path="settings"
+            element={
+              <SettingsScreen
+                profile={{
+                  ...profile,
+                  email: session.user.email,
+                  avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`,
+                }}
+                setProfile={setProfile}
+                onSignOut={handleSignOut}
+                addAction={addAction}
+              />
+            }
+          />
+
+          <Route path="paywall" element={<PaywallScreen profile={profile} setProfile={setProfile} />} />
+          <Route path="audit" element={<AuditLogScreen actions={actions} />} />
+
+          {/* default inside app */}
+          <Route path="*" element={<Navigate to="chat" replace />} />
+        </Routes>
+
+        {isDataLoading && (
+          <div className="px-6 pb-6">
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-300">Syncing latest updates...</div>
+          </div>
+        )}
+      </main>
+
+      <nav className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around py-4 pb-8 px-6 z-50">
+        <NavItem to="/app/chat" icon={<ICONS.Chat className="w-6 h-6" />} label="Assistant" />
+        <NavItem to="/app/today" icon={<ICONS.Today className="w-6 h-6" />} label="Schedule" />
+        <NavItem to="/app/tasks" icon={<ICONS.Tasks className="w-6 h-6" />} label="Tasks" />
+        <NavItem to="/app/notes" icon={<ICONS.Notes className="w-6 h-6" />} label="Notes" />
+        <NavItem to="/app/settings" icon={<ICONS.Settings className="w-6 h-6" />} label="Setup" />
+      </nav>
+    </div>
+  );
+};
+
+const NavItem: React.FC<{ to: string; icon: React.ReactNode; label: string }> = ({ to, icon, label }) => (
+  <NavLink
+    to={to}
+    className={({ isActive }) =>
+      `flex flex-col items-center justify-center space-y-1 transition-all ${isActive ? 'scale-110' : 'text-slate-400'}`
+    }
+    style={({ isActive }) => ({ color: isActive ? COLORS.primary : undefined })}
+  >
+    {icon}
+    <span className="text-[10px] font-bold uppercase tracking-widest">{label}</span>
+  </NavLink>
+);
+
 const App: React.FC = () => {
-  const tz = useMemo(() => getUserTimeZone(), []);
+  useMemo(() => getUserTimeZone(), []); // keep your timezone helper warm
 
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -360,7 +518,6 @@ const App: React.FC = () => {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [notification, setNotification] = useState<{ title: string; body: string } | null>(null);
 
-  // Good notifications
   const triggerNotification = useCallback((title: string, body: string) => {
     setNotification({ title, body });
     setTimeout(() => setNotification(null), 4200);
@@ -404,13 +561,9 @@ const App: React.FC = () => {
 
   const fetchProfile = async (user: any) => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
 
-      if (error && error.code === 'PGRST116') {
+      if (error && (error as any).code === 'PGRST116') {
         const fullName = user.user_metadata?.full_name || user.user_metadata?.name || 'New User';
         const { data: newProfile } = await supabase
           .from('profiles')
@@ -458,15 +611,10 @@ const App: React.FC = () => {
     }
   }, [session, fetchAllData]);
 
-  // Persist chat
   useEffect(() => {
     localStorage.setItem('queso_chat', JSON.stringify(messages));
   }, [messages]);
 
-  /**
-   * Action logger (supports result payload too)
-   * This improves tracing for success messages (text + voice)
-   */
   const addAction = useCallback(
     async (type: string, input: any, result?: any) => {
       if (!session?.user || !isSupabaseConfigured) return;
@@ -479,35 +627,15 @@ const App: React.FC = () => {
       };
 
       try {
-        const { data, error } = await supabase
-          .from('assistant_actions')
-          .insert([payload])
-          .select()
-          .single();
-
+        const { data, error } = await supabase.from('assistant_actions').insert([payload]).select().single();
         if (!error && data) setActions((prev) => [data, ...prev]);
       } catch (e) {
-        // don’t crash UI if audit insert fails
         console.warn('assistant_actions insert failed', e);
       }
     },
     [session?.user]
   );
 
-  /**
-   * ---------- GOOGLE CALENDAR SYNC (PRO) ----------
-   * To get Google notifications on your phone:
-   * - we must create events in YOUR Google Calendar.
-   *
-   * This requires:
-   * - OAuth with calendar scope (not just basic Google login)
-   * - storing refresh token securely (Supabase)
-   * - server-side insert into Google Calendar (Edge Function)
-   *
-   * This function:
-   * - always writes to internal "events" table
-   * - if PRO + google connected -> also calls Edge Function to insert into Google Calendar
-   */
   const silentCalendarSync = useCallback(
     async (title: string, date: string | null) => {
       if (!date || !session?.user || !isSupabaseConfigured) return;
@@ -515,11 +643,9 @@ const App: React.FC = () => {
       const d = safeParseDate(date);
       if (!d) return;
 
-      // Store without drift: ISO WITH OFFSET
       const startAt = toISOWithOffset(d);
-      const endAt = toISOWithOffset(new Date(d.getTime() + 30 * 60 * 1000)); // 30 mins
+      const endAt = toISOWithOffset(new Date(d.getTime() + 30 * 60 * 1000));
 
-      // Prevent duplicates (best-effort)
       try {
         const { data: existing } = await supabase
           .from('events')
@@ -529,11 +655,8 @@ const App: React.FC = () => {
           .eq('start_at', startAt);
 
         if (existing && existing.length > 0) return;
-      } catch {
-        // ignore dedupe failure
-      }
+      } catch {}
 
-      // 1) Always store internally
       try {
         const { data, error } = await supabase
           .from('events')
@@ -551,49 +674,23 @@ const App: React.FC = () => {
           .select()
           .single();
 
-        if (!error && data) {
-          setEvents((prev) => [data, ...prev]);
-        }
+        if (!error && data) setEvents((prev) => [data, ...prev]);
       } catch (e) {
         console.warn('internal calendar insert failed', e);
       }
 
-      // 2) If PRO, also push to Google Calendar (so phone notifications work)
       const isPro = (profile?.plan || 'free') === 'pro';
       if (!isPro) return;
 
-      // If user connected google calendar, we expect a flag in localStorage (or profile later)
       const googleConnected = localStorage.getItem('google_calendar_connected') === 'true';
+      if (!googleConnected) return;
 
-      if (!googleConnected) {
-        // Don’t spam users; only a gentle notice
-        // (You’ll add a proper “Connect Google Calendar” in Settings)
-        return;
-      }
-
-      // Call your Supabase Edge Function (you will create this next)
-      // Function should:
-      // - read stored refresh token for user
-      // - insert an event into Google Calendar
       try {
-        const { data: fnData, error: fnError } = await supabase.functions.invoke('google-calendar-sync', {
-          body: {
-            title,
-            start_at: startAt,
-            end_at: endAt,
-            description: 'Queso Assistant Sync',
-          },
+        const { error: fnError } = await supabase.functions.invoke('google-calendar-sync', {
+          body: { title, start_at: startAt, end_at: endAt, description: 'Queso Assistant Sync' },
         });
 
-        if (fnError) {
-          console.warn('google calendar sync failed', fnError);
-          return;
-        }
-
-        // Optional: mark the matching internal event as google_calendar source
-        // (only if your edge function returns googleEventId)
-        // Example: if (fnData?.googleEventId) { ... }
-
+        if (fnError) console.warn('google calendar sync failed', fnError);
       } catch (e) {
         console.warn('google calendar edge invoke failed', e);
       }
@@ -601,26 +698,20 @@ const App: React.FC = () => {
     [session?.user, profile?.plan]
   );
 
-  // Better sign out
   const handleSignOut = async () => {
     try {
       if (isSupabaseConfigured) await supabase.auth.signOut();
     } finally {
       localStorage.removeItem('queso_chat');
-      // Keep timezone + google flags if you want
-      // localStorage.clear();  // (this clears timezone too - not ideal)
       window.location.reload();
     }
   };
 
-  // If plan updates to PRO, show a strong confirmation and refetch
   useEffect(() => {
     if (!profile?.plan) return;
     if (profile.plan === 'pro') {
-      triggerNotification(
-        buildSuccess('Pro Activated', 'All features are now unlocked — including full drafts and calendar sync.').title,
-        buildSuccess('Pro Activated', 'All features are now unlocked — including full drafts and calendar sync.').body
-      );
+      const msg = buildSuccess('Pro Activated', 'All features are now unlocked — including full drafts and calendar sync.');
+      triggerNotification(msg.title, msg.body);
       fetchAllData();
     }
   }, [profile?.plan, fetchAllData, triggerNotification]);
@@ -630,9 +721,7 @@ const App: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-8 text-center">
         <div>
           <h1 className="text-2xl font-black mb-2">Missing Supabase Env</h1>
-          <p className="text-slate-300 text-sm">
-            Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.
-          </p>
+          <p className="text-slate-300 text-sm">Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.</p>
         </div>
       </div>
     );
@@ -647,157 +736,51 @@ const App: React.FC = () => {
     );
   }
 
-  if (!session) return <AuthScreen onAuthStarted={() => setIsInitializing(true)} />;
-
   return (
     <HashRouter>
-      <div className="flex flex-col h-screen bg-slate-50 max-w-md mx-auto relative border-x border-slate-200 shadow-2xl overflow-hidden">
-        {notification && (
-          <div className="absolute top-6 left-4 right-4 z-[200] animate-in slide-in-from-top-12 duration-500">
-            <div className="bg-white/95 backdrop-blur-xl border border-slate-200 p-4 rounded-3xl shadow-2xl flex items-center space-x-4">
-              <div className="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center text-white shrink-0">
-                <ICONS.Check className="w-6 h-6" />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-xs font-black text-slate-800">{notification.title}</h4>
-                <p className="text-[10px] text-slate-600 line-clamp-2">
-                  {notification.body}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
+      <Routes>
+        {/* ✅ PUBLIC ROUTES (NO LOGIN REQUIRED) */}
+        <Route path="/" element={<LandingScreen />} />
+        <Route path="/privacy" element={<PrivacyScreen />} />
+        <Route path="/login" element={<AuthScreen onAuthStarted={() => setIsInitializing(true)} />} />
 
-        <main className="flex-1 overflow-y-auto pb-24 scroll-smooth">
-          <Routes>
-          <Route path="/" element={<LandingScreen />} />
-          <Route path="/privacy" element={<PrivacyScreen />} />
+        {/* ✅ PRIVATE APP ROUTES */}
+        <Route
+          path="/app/*"
+          element={
+            <RequireAuth session={session}>
+              <AppShell
+                profile={profile}
+                session={session}
+                tasks={tasks}
+                setTasks={setTasks}
+                events={events}
+                setEvents={setEvents}
+                notes={notes}
+                setNotes={setNotes}
+                drafts={drafts}
+                setDrafts={setDrafts}
+                actions={actions}
+                addAction={addAction}
+                silentCalendarSync={silentCalendarSync}
+                messages={messages}
+                setMessages={setMessages}
+                fetchAllData={fetchAllData}
+                triggerNotification={triggerNotification}
+                notification={notification}
+                isDataLoading={isDataLoading}
+                setProfile={setProfile}
+                handleSignOut={handleSignOut}
+              />
+            </RequireAuth>
+          }
+        />
 
-            <Route
-              path="/chat"
-              element={
-                <ChatScreen
-                  plan={profile?.plan || 'free'}
-                  messages={messages}
-                  setMessages={setMessages}
-                  onClearChat={() => {
-                    setMessages([]);
-                    localStorage.removeItem('queso_chat');
-                  }}
-                  setTasks={setTasks}
-                  setEvents={setEvents}
-                  setNotes={setNotes}
-                  setDrafts={setDrafts}
-                  triggerNotification={(title, body) => triggerNotification(title, body)}
-                  addAction={addAction}
-                  syncToCalendar={silentCalendarSync}
-                  refreshData={fetchAllData}
-                />
-              }
-            />
-
-            <Route
-              path="/today"
-              element={<TodayScreen plan={profile?.plan || 'free'} tasks={tasks} events={events} notes={notes} />}
-            />
-
-            <Route
-              path="/tasks"
-              element={
-                <TasksScreen
-                  plan={profile?.plan || 'free'}
-                  tasks={tasks}
-                  setTasks={setTasks}
-                  addAction={addAction}
-                  syncToCalendar={silentCalendarSync}
-                />
-              }
-            />
-
-            <Route
-              path="/calendar"
-              element={<CalendarScreen events={events} setEvents={setEvents} addAction={addAction} />}
-            />
-
-            <Route
-              path="/notes"
-              element={
-                <NotesScreen
-                  plan={profile?.plan || 'free'}
-                  notes={notes}
-                  setNotes={setNotes}
-                  addAction={addAction}
-                  syncToCalendar={silentCalendarSync}
-                />
-              }
-            />
-
-            <Route
-              path="/drafts/:id"
-              element={
-                <DraftsScreen
-                  plan={profile?.plan || 'free'}
-                  drafts={drafts}
-                  triggerNotification={triggerNotification}
-                  addAction={addAction}
-                />
-              }
-            />
-
-            <Route
-              path="/settings"
-              element={
-                <SettingsScreen
-                  profile={{
-                    ...profile,
-                    email: session.user.email,
-                    avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`,
-                  }}
-                  setProfile={setProfile}
-                  onSignOut={handleSignOut}
-                  addAction={addAction}
-                />
-              }
-            />
-
-            <Route path="/paywall" element={<PaywallScreen profile={profile} setProfile={setProfile} />} />
-
-            <Route path="/audit" element={<AuditLogScreen actions={actions} />} />
-          </Routes>
-
-          {/* Optional tiny loader indicator */}
-          {isDataLoading && (
-            <div className="px-6 pb-6">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-300">
-                Syncing latest updates...
-              </div>
-            </div>
-          )}
-        </main>
-
-        <nav className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around py-4 pb-8 px-6 z-50">
-          <NavItem to="/chat" icon={<ICONS.Chat className="w-6 h-6" />} label="Assistant" />
-          <NavItem to="/today" icon={<ICONS.Today className="w-6 h-6" />} label="Schedule" />
-          <NavItem to="/tasks" icon={<ICONS.Tasks className="w-6 h-6" />} label="Tasks" />
-          <NavItem to="/notes" icon={<ICONS.Notes className="w-6 h-6" />} label="Notes" />
-          <NavItem to="/settings" icon={<ICONS.Settings className="w-6 h-6" />} label="Setup" />
-        </nav>
-      </div>
+        {/* fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </HashRouter>
   );
 };
-
-const NavItem: React.FC<{ to: string; icon: React.ReactNode; label: string }> = ({ to, icon, label }) => (
-  <NavLink
-    to={to}
-    className={({ isActive }) =>
-      `flex flex-col items-center justify-center space-y-1 transition-all ${isActive ? 'scale-110' : 'text-slate-400'}`
-    }
-    style={({ isActive }) => ({ color: isActive ? COLORS.primary : undefined })}
-  >
-    {icon}
-    <span className="text-[10px] font-bold uppercase tracking-widest">{label}</span>
-  </NavLink>
-);
 
 export default App;
