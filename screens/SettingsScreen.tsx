@@ -75,7 +75,7 @@ const SettingsScreen: React.FC<{ profile: any; setProfile: any; onSignOut: () =>
   value={localStorage.getItem('google_calendar_connected') === 'true' ? 'Connected' : 'Not Connected'}
   onClick={handleConnectGoogleCalendar}
 />
-            <SettingRow icon={<ICONS.Check className="w-5 h-5" />} label="Assistant Ledger" onClick={() => navigate('/audit')} />
+            <SettingRow icon={<ICONS.Check className="w-5 h-5" />} label="Assistant Ledger" onClick={() => navigate('/app/audit')} />
             <SettingRow icon={<ICONS.Lock className="w-5 h-5" />} label="Privacy Settings" onClick={() => setShowSecurityCenter(true)} isLast />
           </div>
         </section>
@@ -86,7 +86,7 @@ const SettingsScreen: React.FC<{ profile: any; setProfile: any; onSignOut: () =>
             <SettingRow 
               icon={<ICONS.Plus className="w-5 h-5" />} 
               label="Upgrade Subscription" 
-              onClick={() => navigate('/paywall')} 
+              onClick={() => navigate('/app/paywall')} 
               isLast
             />
           </div>

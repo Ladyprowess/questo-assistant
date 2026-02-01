@@ -203,7 +203,7 @@ const TodayScreen: React.FC<TodayScreenProps> = ({ plan, tasks, events, notes })
         </div>
 
         <button
-          onClick={() => navigate('/calendar')}
+          onClick={() => navigate('/app/calendar')}
           className="bg-white p-2 rounded-xl shadow-sm border border-slate-100 active:scale-95 transition-transform"
         >
           <ICONS.Calendar className="w-5 h-5 text-teal-600" />
@@ -219,7 +219,7 @@ const TodayScreen: React.FC<TodayScreenProps> = ({ plan, tasks, events, notes })
               AI Summary Locked
             </p>
             <button
-              onClick={() => navigate('/paywall')}
+              onClick={() => navigate('/app/paywall')}
               className="text-[8px] font-black text-teal-400 uppercase tracking-widest underline underline-offset-4"
             >
               Upgrade to Pro
@@ -260,7 +260,7 @@ const TodayScreen: React.FC<TodayScreenProps> = ({ plan, tasks, events, notes })
           <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Timeline</h3>
 
           <button
-            onClick={() => navigate('/calendar')}
+            onClick={() => navigate('/app/calendar')}
             className="text-[10px] font-bold text-teal-600 uppercase tracking-widest flex items-center"
           >
             Full View

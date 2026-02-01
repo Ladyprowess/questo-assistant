@@ -343,7 +343,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
     // Free limit only applies to free users
     if (!isPro && getDailyMessageCount() >= 20) {
-      navigate('/paywall');
+      navigate('/app/paywall');
       return;
     }
 
@@ -504,7 +504,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     if (!input.trim() || isLoading) return;
 
     if (!isPro && getDailyMessageCount() >= 20) {
-      navigate('/paywall');
+      navigate('/app/paywall');
       return;
     }
 
@@ -624,7 +624,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             {msg.draftId && (
               <div className="mt-3 w-full max-w-[85%] bg-indigo-50 border border-indigo-100 p-4 rounded-2xl shadow-sm">
                 <button
-                  onClick={() => navigate(`/drafts/${msg.draftId}`)}
+                  onClick={() => navigate(`/app/drafts/${msg.draftId}`)}
                   className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all"
                 >
                   Review Message Draft
