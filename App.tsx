@@ -4,6 +4,7 @@ import { ICONS, COLORS } from './constants';
 import { Task, CalendarEvent, Note, AssistantAction, Draft } from './types';
 import { supabase, isSupabaseConfigured, saveSupabaseConfig } from './services/supabase';
 
+
 // Screens
 import ChatScreen from './screens/ChatScreen';
 import TodayScreen from './screens/TodayScreen';
@@ -14,6 +15,8 @@ import SettingsScreen from './screens/SettingsScreen';
 import PaywallScreen from './screens/PaywallScreen';
 import AuditLogScreen from './screens/AuditLogScreen';
 import DraftsScreen from './screens/DraftsScreen';
+import LandingScreen from "./screens/LandingScreen";
+import PrivacyScreen from "./screens/PrivacyScreen";
 
 export const COUNTRY_TIMEZONES: Record<string, string> = {
   Nigeria: 'Africa/Lagos',
@@ -667,7 +670,8 @@ const App: React.FC = () => {
 
         <main className="flex-1 overflow-y-auto pb-24 scroll-smooth">
           <Routes>
-            <Route path="/" element={<Navigate to="/chat" />} />
+          <Route path="/" element={<LandingScreen />} />
+          <Route path="/privacy" element={<PrivacyScreen />} />
 
             <Route
               path="/chat"
