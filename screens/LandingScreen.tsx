@@ -3,9 +3,23 @@ import { COLORS } from "../constants";
 
 const LandingScreen: React.FC = () => {
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center py-10">
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center">
       {/* Phone Frame */}
-      <div className="w-full max-w-md bg-white border-x border-slate-200 shadow-2xl rounded-[32px] overflow-hidden">
+      <div
+  className="
+    w-full max-w-md
+    bg-white
+    border-x border-slate-200
+    shadow-2xl
+    rounded-[32px]
+    overflow-y-auto
+    overscroll-contain
+  "
+  style={{
+    height: '92vh',
+    WebkitOverflowScrolling: 'touch',
+  }}
+>
         {/* Top bar */}
         <div className="px-6 pt-8 pb-5 border-b border-slate-100">
           <div className="flex items-center justify-between">
