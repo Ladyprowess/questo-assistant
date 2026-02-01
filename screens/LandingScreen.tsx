@@ -23,7 +23,7 @@ const LandingScreen: React.FC = () => {
             </div>
 
             <a
-              href="#/login"
+              href="/login"
               className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-900"
             >
               Sign in
@@ -45,7 +45,7 @@ const LandingScreen: React.FC = () => {
           {/* Primary actions */}
           <div className="mt-7 grid grid-cols-2 gap-3">
             <a
-              href="#/login"
+              href="/login"
               className="py-4 rounded-2xl text-white font-black uppercase tracking-widest text-center shadow-xl active:scale-95 transition-all"
               style={{ backgroundColor: COLORS.primary }}
             >
@@ -53,7 +53,7 @@ const LandingScreen: React.FC = () => {
             </a>
 
             <a
-              href="#/privacy"
+              href="/privacy"
               className="py-4 rounded-2xl bg-slate-100 text-slate-900 font-black uppercase tracking-widest text-center active:scale-95 transition-all"
             >
               Privacy
@@ -83,10 +83,10 @@ const LandingScreen: React.FC = () => {
         {/* Footer (Google needs privacy link on homepage) */}
         <div className="px-6 py-6 border-t border-slate-100 bg-white">
           <div className="flex items-center justify-center gap-6">
-            <a href="#/privacy" className="text-xs font-bold text-slate-600 hover:text-slate-900">
+            <a href="/privacy" className="text-xs font-bold text-slate-600 hover:text-slate-900">
               Privacy Policy
             </a>
-            <a href="#/login" className="text-xs font-bold text-slate-600 hover:text-slate-900">
+            <a href="/login" className="text-xs font-bold text-slate-600 hover:text-slate-900">
               Sign in
             </a>
           </div>

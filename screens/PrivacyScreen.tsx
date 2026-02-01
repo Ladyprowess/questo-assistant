@@ -10,14 +10,14 @@ const PrivacyScreen: React.FC = () => {
         <div className="px-6 pt-8 pb-5 border-b border-slate-100">
           <div className="flex items-center justify-between">
             <a
-              href="#/"
+              href="/"
               className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-900"
             >
               ← Back
             </a>
 
             <a
-              href="#/login"
+              href="/login"
               className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-900"
             >
               Sign in
@@ -78,7 +78,7 @@ const PrivacyScreen: React.FC = () => {
 
           <div className="pt-2">
             <a
-              href="#/"
+              href="/"
               className="w-full block text-center py-4 rounded-2xl text-white font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
               style={{ backgroundColor: COLORS.primary }}
             >

@@ -303,7 +303,7 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
 
         {/* Helpful for verification */}
         <div className="pt-2">
-          <a href="#/privacy" className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">
+          <a href="/privacy" className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600">
             Privacy Policy
           </a>
         </div>
