@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
 import { ICONS, COLORS } from './constants';
 import { Task, CalendarEvent, Note, AssistantAction, Draft } from './types';
 import { supabase, isSupabaseConfigured, saveSupabaseConfig } from './services/supabase';
@@ -737,7 +737,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <HashRouter>
+    <BrowserRouter>
       <Routes>
         {/* ✅ PUBLIC ROUTES (NO LOGIN REQUIRED) */}
         <Route path="/" element={<LandingScreen />} />
@@ -779,7 +779,7 @@ const App: React.FC = () => {
         {/* fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </HashRouter>
+    </BrowserRouter>
   );
 };
 
