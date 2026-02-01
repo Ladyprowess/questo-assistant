@@ -381,7 +381,7 @@ const AppShell: React.FC<{
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto pb-24 scroll-smooth">
+      <main className="flex-1 overflow-y-auto pb-32 scroll-smooth">
         <Routes>
           <Route
             path="chat"
@@ -478,7 +478,7 @@ const AppShell: React.FC<{
         )}
       </main>
 
-      <nav className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around py-4 pb-8 px-6 z-50">
+      <nav className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around px-6 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+16px)] z-50">
         <NavItem to="/app/chat" icon={<ICONS.Chat className="w-6 h-6" />} label="Assistant" />
         <NavItem to="/app/today" icon={<ICONS.Today className="w-6 h-6" />} label="Schedule" />
         <NavItem to="/app/tasks" icon={<ICONS.Tasks className="w-6 h-6" />} label="Tasks" />
