@@ -236,11 +236,8 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
+          redirectTo: `${window.location.origin}/#/chat`,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
         },
       });
       if (error) throw error;

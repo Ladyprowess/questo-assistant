@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { ICONS, COLORS } from '../constants';
 import { useNavigate } from 'react-router-dom';
 import { COUNTRY_TIMEZONES } from '../App';
+import { connectGoogleCalendar } from '../services/googleCalendarAuth';
 
 const SettingsScreen: React.FC<{ profile: any; setProfile: any; onSignOut: () => void; addAction: (t: string, i: any) => void }> = ({ profile, setProfile, onSignOut, addAction }) => {
   const navigate = useNavigate();
@@ -10,6 +11,15 @@ const SettingsScreen: React.FC<{ profile: any; setProfile: any; onSignOut: () =>
   const [showCountryModal, setShowCountryModal] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [is2FAEnabled, setIs2FAEnabled] = useState(false);
+  const handleConnectGoogleCalendar = async () => {
+    try {
+      await connectGoogleCalendar();
+      addAction('google_calendar_connected', { connected: true });
+      alert('Google Calendar connected successfully.');
+    } catch (e: any) {
+      alert(e?.message || 'Google Calendar connection failed.');
+    }
+  };
 
   const handleToggle2FA = () => {
     setIs2FAEnabled(!is2FAEnabled);
@@ -59,6 +69,12 @@ const SettingsScreen: React.FC<{ profile: any; setProfile: any; onSignOut: () =>
               onClick={() => setShowCountryModal(true)}
             />
             <SettingRow icon={<ICONS.Today className="w-5 h-5" />} label="Timezone" value={profile.timezone} />
+            <SettingRow
+  icon={<ICONS.Today className="w-5 h-5" />}
+  label="Connect Google Calendar"
+  value={localStorage.getItem('google_calendar_connected') === 'true' ? 'Connected' : 'Not Connected'}
+  onClick={handleConnectGoogleCalendar}
+/>
             <SettingRow icon={<ICONS.Check className="w-5 h-5" />} label="Assistant Ledger" onClick={() => navigate('/audit')} />
             <SettingRow icon={<ICONS.Lock className="w-5 h-5" />} label="Privacy Settings" onClick={() => setShowSecurityCenter(true)} isLast />
           </div>

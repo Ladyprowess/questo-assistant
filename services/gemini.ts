@@ -268,12 +268,7 @@ declare global {
   }
 }
 
-const GOOGLE_CLIENT_ID =
-  (import.meta as any)?.env?.VITE_GOOGLE_CLIENT_ID ||
-  (import.meta as any)?.env?.GOOGLE_CLIENT_ID ||
-  (process as any)?.env?.VITE_GOOGLE_CLIENT_ID ||
-  (process as any)?.env?.GOOGLE_CLIENT_ID ||
-  "";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
 
 const GCAL_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
