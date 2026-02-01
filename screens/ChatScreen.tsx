@@ -55,12 +55,13 @@ interface ChatScreenProps {
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
   setDrafts: React.Dispatch<React.SetStateAction<Draft[]>>;
   triggerNotification: (title: string, body: string) => void;
-  addAction: (type: string, input: any) => void;
+  addAction: (type: string, input: any, result?: any) => Promise<void>;
   syncToCalendar: (title: string, date: string | null) => void;
+  refreshData: () => Promise<void>;
 }
 
 const ChatScreen: React.FC<ChatScreenProps> = ({ 
-  plan, messages, setMessages, onClearChat, setTasks, setEvents, setNotes, setDrafts, triggerNotification, addAction, syncToCalendar 
+  plan, messages, setMessages, onClearChat, setTasks, setEvents, setNotes, setDrafts, triggerNotification, addAction, syncToCalendar, refreshData 
 }) => {
   const navigate = useNavigate();
   const [input, setInput] = useState('');
@@ -78,6 +79,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const nextStartTimeRef = useRef(0);
   const sessionRef = useRef<any>(null);
+  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   
   const audioResourcesRef = useRef<{ 
     inputCtx: AudioContext | null; 
@@ -87,7 +89,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   }>({ inputCtx: null, outputCtx: null, stream: null, processor: null });
 
   useEffect(() => {
-    scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, isLoading, liveUserText, liveAssistantText]);
 
   useEffect(() => {
@@ -105,136 +107,101 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     localStorage.setItem(`queso_msg_count_${today}`, count.toString());
   };
 
-  const executeFunction = async (name: string, args: any) => {
-    addAction(name, args);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { error: "No authenticated user" };
-
-    if (name === 'create_task') {
-      const { data, error } = await supabase.from('tasks').insert([{
-        user_id: user.id,
-        title: args.title,
-        description: args.description || '',
-        due_at: args.due_at,
-        priority: args.priority || 'medium'
-      }]).select().single();
-      
-      if (data) {
-        setTasks(prev => [data, ...prev]);
-        syncToCalendar(args.title, args.due_at);
-        triggerNotification("Task Ledgered", args.title);
-      }
-      return { result: "Task created" };
+  const ensureProfileExists = async (user: any) => {
+    const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).single();
+    if (!profile) {
+      console.warn("Tool execution: Profile missing, auto-generating...");
+      const fullName = user.user_metadata?.full_name || 'Queso User';
+      await supabase.from('profiles').insert([{ id: user.id, full_name: fullName, plan: 'free' }]);
+      await supabase.from('subscriptions').insert([{ user_id: user.id, plan: 'free', status: 'active' }]);
     }
-
-    if (name === 'create_note') {
-      const { data, error } = await supabase.from('notes').insert([{
-        user_id: user.id,
-        title: args.title,
-        content: args.content,
-        scheduled_at: args.scheduled_at
-      }]).select().single();
-
-      if (data) {
-        setNotes(prev => [data, ...prev]);
-        syncToCalendar(`Note: ${args.title}`, args.scheduled_at);
-        triggerNotification("Intel Recorded", args.title);
-      }
-      return { result: "Note created" };
-    }
-
-    if (name === 'create_event') {
-      const { data, error } = await supabase.from('events').insert([{
-        user_id: user.id,
-        title: args.title,
-        start_at: args.start_at,
-        end_at: args.end_at,
-        location: args.location || ''
-      }]).select().single();
-
-      if (data) {
-        setEvents(prev => [data, ...prev]);
-        syncToCalendar(args.title, args.start_at);
-        triggerNotification("Event Locked", args.title);
-      }
-      return { result: "Event created" };
-    }
-
-    if (name === 'draft_message') {
-      const { data, error } = await supabase.from('drafts').insert([{
-        user_id: user.id,
-        channel: args.channel || 'email',
-        recipient: args.recipient || '',
-        subject: args.subject || '',
-        body: args.body
-      }]).select().single();
-
-      if (data) {
-        setDrafts(prev => [data, ...prev]);
-        return { result: "Draft produced", draftId: data.id };
-      }
-      return { result: "Draft failed" };
-    }
-    return { result: "Process complete" };
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  const executeFunction = async (name: string, args: any) => {
+    console.log(`[LEDGER] Executing: ${name}`, args);
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
     
-    if (plan === 'free' && getDailyMessageCount() >= 20) {
-      navigate('/paywall');
-      return;
+    if (authErr || !user) {
+      triggerNotification("Auth Failed", "Session expired. Re-login required.");
+      return { error: "Session expired." };
     }
 
-    const userMessage: Message = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: input.trim(),
-      timestamp: new Date()
-    };
+    await ensureProfileExists(user);
 
-    setMessages(prev => [...prev, userMessage]);
-    const currentInput = input;
-    setInput('');
-    setIsLoading(true);
-    incrementMessageCount();
+    let resultPayload: { status: string; error?: string; id?: string } = { status: 'failed', error: 'Unknown' };
 
     try {
-      const history = messages.slice(-10).map(m => ({
-        role: m.role,
-        content: m.content
-      }));
-      history.push({ role: 'user', content: currentInput.trim() });
-
-      const response = await getGeminiResponse(history, plan);
-      
-      let assistantContent = response.text || '';
-      let isAction = false;
-      let draftId = undefined;
-
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        for (const fc of response.functionCalls) {
-          const executionResult: any = await executeFunction(fc.name, fc.args);
-          isAction = true;
-          if (executionResult?.draftId) draftId = executionResult.draftId;
-        }
+      if (name === 'create_task') {
+        const { data, error } = await supabase.from('tasks').insert([{
+          user_id: user.id,
+          title: args.title,
+          description: args.description || '',
+          due_at: args.due_at || new Date().toISOString(),
+          priority: args.priority || 'medium'
+        }]).select().single();
+        
+        if (data) {
+          syncToCalendar(args.title, args.due_at);
+          triggerNotification("Ledger Updated", `Task: ${args.title}`);
+          resultPayload = { status: 'success', id: data.id };
+        } else if (error) throw error;
       }
 
-      const assistantMessage: Message = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: cleanResponse(assistantContent) || (isAction ? "I've handled that for you." : "I'm sorry, I couldn't process that."),
-        timestamp: new Date(),
-        isAction,
-        draftId
-      };
+      else if (name === 'create_note') {
+        const { data, error } = await supabase.from('notes').insert([{
+          user_id: user.id,
+          title: args.title,
+          content: args.content,
+          scheduled_at: args.scheduled_at || new Date().toISOString()
+        }]).select().single();
 
-      setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
-      console.error("Chat Error:", error);
-      triggerNotification("Communication Error", "Unable to reach Queso Assistant.");
-    } finally {
-      setIsLoading(false);
+        if (data) {
+          syncToCalendar(`Note: ${args.title}`, args.scheduled_at);
+          triggerNotification("Intelligence Saved", args.title);
+          resultPayload = { status: 'success', id: data.id };
+        } else if (error) throw error;
+      }
+
+      else if (name === 'create_event') {
+        const { data, error } = await supabase.from('events').insert([{
+          user_id: user.id,
+          title: args.title,
+          start_at: args.start_at,
+          end_at: args.end_at,
+          location: args.location || ''
+        }]).select().single();
+
+        if (data) {
+          triggerNotification("Calendar Event Locked", args.title);
+          resultPayload = { status: 'success', id: data.id };
+        } else if (error) throw error;
+      }
+
+      else if (name === 'draft_message') {
+        const { data, error } = await supabase.from('drafts').insert([{
+          user_id: user.id,
+          channel: args.channel || 'email',
+          recipient: args.recipient || '',
+          subject: args.subject || '',
+          body: args.body
+        }]).select().single();
+
+        if (data) {
+          resultPayload = { status: 'success', id: data.id };
+          await addAction(name, args, resultPayload);
+          await refreshData();
+          return { result: "Draft created successfully.", draftId: data.id };
+        } else if (error) throw error;
+      }
+
+      await addAction(name, args, resultPayload);
+      await refreshData();
+      return { result: "The record has been permanently saved to your cloud ledger." };
+    } catch (e: any) {
+      console.error(`[LEDGER ERROR] ${name}:`, e);
+      triggerNotification("Cloud Save Failed", e.message || "Unknown DB Error");
+      await addAction(name, args, { status: 'error', message: e.message });
+      return { error: `Database rejection: ${e.message}` };
     }
   };
 
@@ -244,11 +211,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       try { sessionRef.current.close(); } catch (e) {}
       sessionRef.current = null;
     }
+    sourcesRef.current.forEach(source => { try { source.stop(); } catch (e) {} });
+    sourcesRef.current.clear();
     const { inputCtx, outputCtx, stream, processor } = audioResourcesRef.current;
     if (processor) { try { processor.disconnect(); } catch (e) {} }
     if (stream) stream.getTracks().forEach(track => track.stop());
-    if (inputCtx && inputCtx.state !== 'closed') { try { inputCtx.close(); } catch (e) {} }
-    if (outputCtx && outputCtx.state !== 'closed') { try { outputCtx.close(); } catch (e) {} }
+    if (inputCtx && inputCtx.state !== 'closed') inputCtx.close();
+    if (outputCtx && outputCtx.state !== 'closed') outputCtx.close();
     audioResourcesRef.current = { inputCtx: null, outputCtx: null, stream: null, processor: null };
     setIsVoiceActive(false);
     setVoiceStatus('idle');
@@ -260,57 +229,37 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   const toggleVoiceMode = async () => {
-    if (isVoiceActive) {
-      stopVoiceMode();
-      return;
-    }
-    if (plan === 'free' && getDailyMessageCount() >= 20) {
-      navigate('/paywall');
-      return;
-    }
-    
+    if (isVoiceActive) { stopVoiceMode(); return; }
+    if (plan === 'free' && getDailyMessageCount() >= 20) { navigate('/paywall'); return; }
     setIsVoiceActive(true);
     isVoiceActiveRef.current = true;
     setVoiceStatus('connecting');
-
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      
       await inputCtx.resume();
       await outputCtx.resume();
-
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioResourcesRef.current = { inputCtx, outputCtx, stream, processor: null };
       nextStartTimeRef.current = outputCtx.currentTime;
-      
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
             setVoiceStatus('listening');
             const micSource = inputCtx.createMediaStreamSource(stream);
-            const processor = inputCtx.createScriptProcessor(2048, 1, 1);
+            const processor = inputCtx.createScriptProcessor(4096, 1, 1);
             audioResourcesRef.current.processor = processor;
-            
             processor.onaudioprocess = (e) => {
               if (!isVoiceActiveRef.current) return;
               const inputData = e.inputBuffer.getChannelData(0);
               let sum = 0;
               for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
               setAudioLevel(Math.min(100, Math.sqrt(sum / inputData.length) * 400));
-
               const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                int16[i] = Math.max(-1, Math.min(1, inputData[i])) * 32767;
-              }
-              
-              sessionPromise.then(s => { 
-                if (s && isVoiceActiveRef.current) {
-                  s.sendRealtimeInput({ media: { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } }); 
-                }
-              });
+              for (let i = 0; i < inputData.length; i++) int16[i] = Math.max(-1, Math.min(1, inputData[i])) * 32767;
+              sessionPromise.then(s => { if (s && isVoiceActiveRef.current) s.sendRealtimeInput({ media: { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } }); });
             };
             micSource.connect(processor);
             processor.connect(inputCtx.destination);
@@ -341,44 +290,79 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                 ]);
                 incrementMessageCount();
               }
-              userAccRef.current = '';
-              assistantAccRef.current = '';
-              setLiveUserText('');
-              setLiveAssistantText('');
-              setVoiceStatus('listening');
+              userAccRef.current = ''; assistantAccRef.current = ''; setLiveUserText(''); setLiveAssistantText(''); setVoiceStatus('listening');
             }
             const audioPart = m.serverContent?.modelTurn?.parts.find(p => p.inlineData);
             if (audioPart?.inlineData?.data) {
               setVoiceStatus('speaking');
               const buffer = await decodeAudioData(decode(audioPart.inlineData.data), outputCtx, 24000, 1);
               const source = outputCtx.createBufferSource();
-              source.buffer = buffer; 
-              source.connect(outputCtx.destination);
+              source.buffer = buffer; source.connect(outputCtx.destination);
+              source.addEventListener('ended', () => { sourcesRef.current.delete(source); if (sourcesRef.current.size === 0) setVoiceStatus('listening'); });
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
+              sourcesRef.current.add(source);
             }
             if (m.serverContent?.interrupted) {
-              nextStartTimeRef.current = outputCtx.currentTime;
-              setVoiceStatus('listening');
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch (e) {} });
+              sourcesRef.current.clear();
+              nextStartTimeRef.current = outputCtx.currentTime; setVoiceStatus('listening'); setLiveAssistantText('(Interrupted)'); assistantAccRef.current = '';
             }
           },
           onclose: () => stopVoiceMode(),
-          onerror: (err) => { console.error("Session Error:", err); stopVoiceMode(); }
+          onerror: () => stopVoiceMode()
         },
         config: {
           responseModalities: [Modality.AUDIO],
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
+          inputAudioTranscription: {}, outputAudioTranscription: {},
           tools: [{ functionDeclarations: assistantTools }],
           systemInstruction: getSystemInstruction(plan),
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } }
         }
       });
       sessionRef.current = await sessionPromise;
-    } catch (err) {
-      console.error("Voice Error:", err);
-      stopVoiceMode();
+    } catch (err) { stopVoiceMode(); }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+    if (plan === 'free' && getDailyMessageCount() >= 20) { navigate('/paywall'); return; }
+    
+    const userMessage: Message = { id: `u-${Date.now()}`, role: 'user', content: input.trim(), timestamp: new Date() };
+    setMessages(prev => [...prev, userMessage]);
+    const currentInput = input; 
+    setInput(''); 
+    setIsLoading(true); 
+    incrementMessageCount();
+
+    try {
+      const history = messages.slice(-10).map(m => ({ role: m.role, content: m.content }));
+      history.push({ role: 'user', content: currentInput.trim() });
+      
+      const response = await getGeminiResponse(history, plan);
+      let assistantContent = response.text || '';
+      let isAction = false; 
+      let draftId = undefined;
+      
+      if (response.functionCalls && response.functionCalls.length > 0) {
+        for (const fc of response.functionCalls) {
+          const res: any = await executeFunction(fc.name, fc.args);
+          isAction = true; 
+          if (res?.draftId) draftId = res.draftId;
+        }
+      }
+      
+      const assistantMessage: Message = {
+        id: `a-${Date.now()}`, role: 'assistant',
+        content: cleanResponse(assistantContent) || (isAction ? "I've processed your request and synchronized the ledger." : "I'm having trouble syncing that right now."),
+        timestamp: new Date(), isAction, draftId
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+    } catch (error) { 
+      triggerNotification("Assistant Offline", "Communication with the cloud lost."); 
+    } finally { 
+      setIsLoading(false); 
     }
   };
 
@@ -391,19 +375,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             <h1 className="font-black text-slate-800 tracking-tight">Queso Assistant</h1>
             <div className="flex items-center mt-0.5">
               <span className={`w-1.5 h-1.5 rounded-full mr-2 ${isVoiceActive ? 'bg-teal-500 animate-pulse' : 'bg-slate-300'}`}></span>
-              <span className="text-[9px] text-slate-400 font-black uppercase tracking-[0.15em]">
-                {isVoiceActive ? `VOICE: ${voiceStatus}` : plan === 'pro' ? 'PRO ACCESS' : `${20 - getDailyMessageCount()} CREDITS`}
-              </span>
+              <span className="text-[9px] text-slate-400 font-black uppercase tracking-[0.15em]">{isVoiceActive ? `VOICE: ${voiceStatus}` : plan === 'pro' ? 'PRO ACCESS' : `${20 - getDailyMessageCount()} CREDITS`}</span>
             </div>
           </div>
         </div>
       </header>
-
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             <div className={`max-w-[85%] px-5 py-4 rounded-3xl text-sm shadow-sm transition-all ${msg.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white text-slate-700 rounded-tl-none border border-slate-100'}`}>
-              {msg.isAction && <div className="text-[8px] font-black uppercase text-teal-500 mb-1">Ledger Updated</div>}
+              {msg.isAction && <div className="text-[8px] font-black uppercase text-teal-500 mb-1">Database Sync Complete</div>}
               {msg.content}
               <div className="text-[8px] text-slate-400 mt-1 text-right opacity-60">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
             </div>
@@ -418,40 +399,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         {liveAssistantText && <div className="flex justify-start"><div className="max-w-[85%] px-5 py-4 rounded-3xl rounded-tl-none text-sm bg-teal-50 border border-teal-100 text-teal-900">{liveAssistantText}</div></div>}
         {isLoading && <div className="flex space-x-1.5 p-4 bg-white/50 rounded-2xl w-16 items-center justify-center animate-pulse"><div className="w-1.5 h-1.5 bg-slate-300 rounded-full"></div><div className="w-1.5 h-1.5 bg-slate-300 rounded-full"></div><div className="w-1.5 h-1.5 bg-slate-300 rounded-full"></div></div>}
       </div>
-
       <div className="p-4 bg-white/80 backdrop-blur-xl border-t border-slate-100 mb-20 relative">
-        {isVoiceActive && (
-          <div className="absolute -top-[1px] left-0 right-0 h-[2px] bg-slate-100 overflow-hidden">
-            <div className="h-full bg-teal-400 transition-all duration-75 ease-out" style={{ width: `${audioLevel}%` }}></div>
-          </div>
-        )}
+        {isVoiceActive && <div className="absolute -top-[1px] left-0 right-0 h-[2px] bg-slate-100 overflow-hidden"><div className="h-full bg-teal-400 transition-all duration-75 ease-out" style={{ width: `${audioLevel}%` }}></div></div>}
         <div className="flex items-center space-x-2">
-          <button 
-            onClick={toggleVoiceMode} 
-            className={`p-4 rounded-2xl transition-all shadow-md border ${isVoiceActive ? 'bg-teal-500 text-white border-teal-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}
-          >
-             {isVoiceActive ? (
-               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                 <rect x="6" y="6" width="12" height="12" rx="2" fill="white" stroke="none" />
-               </svg>
-             ) : (
-               <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>
-               </svg>
-             )}
+          <button onClick={toggleVoiceMode} className={`p-4 rounded-2xl transition-all shadow-md border ${isVoiceActive ? 'bg-teal-500 text-white border-teal-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}`}>
+             {isVoiceActive ? <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" fill="white" stroke="none" /></svg> : <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>}
           </button>
           <div className="relative flex-1">
-            <input 
-              type="text" 
-              value={input} 
-              onChange={(e) => setInput(e.target.value)} 
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()} 
-              placeholder={isVoiceActive ? "Listening for your voice..." : "Message Queso..."} 
-              className="w-full bg-white rounded-2xl py-5 px-6 text-sm focus:ring-4 focus:ring-teal-100 outline-none shadow-sm font-medium border border-slate-100 placeholder:text-slate-300" 
-            />
-            <button onClick={handleSend} className={`absolute right-2 top-2 p-3 active:scale-110 transition-transform ${input.trim() ? 'text-teal-600' : 'text-slate-200'}`}>
-              <ICONS.Plus className="w-5 h-5" />
-            </button>
+            <input type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSend()} placeholder={isVoiceActive ? "Listening..." : "Message Queso..."} className="w-full bg-white rounded-2xl py-5 px-6 text-sm focus:ring-4 focus:ring-teal-100 outline-none shadow-sm font-medium border border-slate-100 placeholder:text-slate-300" />
+            <button onClick={handleSend} className={`absolute right-2 top-2 p-3 active:scale-110 transition-transform ${input.trim() ? 'text-teal-600' : 'text-slate-200'}`}><ICONS.Plus className="w-5 h-5" /></button>
           </div>
         </div>
       </div>

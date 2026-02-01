@@ -26,3 +26,14 @@ export const saveSupabaseConfig = (url: string, key: string) => {
   localStorage.setItem('QUESO_SUPABASE_KEY', key);
   window.location.reload();
 };
+
+export const testSupabaseConnection = async () => {
+  if (!supabase) return { success: false, error: 'Client not initialized' };
+  try {
+    const { data, error } = await supabase.from('profiles').select('count', { count: 'exact', head: true });
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+};

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { ICONS, COLORS } from './constants';
 import { Task, CalendarEvent, Note, AssistantAction, Draft } from './types';
@@ -47,31 +47,25 @@ const SupabaseConfigScreen: React.FC = () => {
         <ICONS.Settings className="w-10 h-10 text-white" />
       </div>
       <h1 className="text-3xl font-black mb-4">Connect Supabase</h1>
-      <p className="text-slate-400 text-sm mb-8 leading-relaxed max-w-xs">
-        Configuration missing. Enter your Supabase project details to enable the cloud ledger and sync features.
+      <p className="text-slate-400 text-sm mb-8 leading-relaxed max-w-xs font-medium">
+        Cloud Ledger missing. Enter project details to enable permanent persistence and sync.
       </p>
       
       <div className="w-full max-w-sm space-y-4">
-        <div className="text-left">
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block ml-4">Project URL</label>
-          <input 
-            type="text" 
-            placeholder="https://xyz.supabase.co" 
-            className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-teal-500 transition-all text-sm"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-        </div>
-        <div className="text-left">
-          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block ml-4">Anon Key</label>
-          <input 
-            type="password" 
-            placeholder="eyJhbGciOiJIUzI1NiIsInR5c..." 
-            className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-teal-500 transition-all text-sm"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-          />
-        </div>
+        <input 
+          type="text" 
+          placeholder="https://xyz.supabase.co" 
+          className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-teal-500 transition-all text-sm font-mono"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <input 
+          type="password" 
+          placeholder="Anon Key" 
+          className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-teal-500 transition-all text-sm font-mono"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+        />
         <button 
           onClick={handleSave}
           className="w-full py-5 bg-teal-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all mt-4"
@@ -90,27 +84,19 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
   const [fullName, setFullName] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const handleAuth = async () => {
     if (!isSupabaseConfigured) return;
     setIsAuthLoading(true);
     setError(null);
-    setSuccessMsg(null);
     try {
       if (isSignup) {
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: { full_name: fullName },
-            emailRedirectTo: window.location.origin
-          }
+          options: { data: { full_name: fullName } }
         });
         if (error) throw error;
-        if (data?.user && !data.session) {
-          setSuccessMsg("Account created! Check your email for a confirmation link.");
-        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -118,28 +104,6 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
     } catch (err: any) {
       setError(err.message);
     } finally {
-      setIsAuthLoading(false);
-    }
-  };
-
-  const handleGoogleAuth = async () => {
-    if (!isSupabaseConfigured) return;
-    setIsAuthLoading(true);
-    onAuthStarted();
-    try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
-        }
-      });
-      if (error) throw error;
-    } catch (err: any) {
-      setError(err.message);
       setIsAuthLoading(false);
     }
   };
@@ -153,29 +117,13 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
       <p className="text-slate-400 text-sm mb-8 font-medium italic">Your private virtual assistant.</p>
       
       <div className="w-full space-y-4 max-w-sm">
-        {error && <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-2xl mb-4">{error}</div>}
-        {successMsg && <div className="p-4 bg-teal-50 text-teal-600 text-xs font-bold rounded-2xl mb-4">{successMsg}</div>}
+        {error && <div className="p-4 bg-red-50 text-red-600 text-[10px] font-black uppercase rounded-2xl mb-4 text-left">{error}</div>}
         
-        <button 
-          onClick={handleGoogleAuth}
-          disabled={isAuthLoading}
-          className="w-full flex items-center justify-center space-x-3 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 mb-2 disabled:opacity-50"
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
-          <span className="text-sm font-bold text-slate-700">Continue with Google</span>
-        </button>
-
-        <div className="flex items-center space-x-4 py-2">
-          <div className="flex-1 h-px bg-slate-100"></div>
-          <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">or email</span>
-          <div className="flex-1 h-px bg-slate-100"></div>
-        </div>
-
         {isSignup && (
           <input 
             type="text" 
             placeholder="Full Name" 
-            className="w-full p-5 bg-slate-50 border-none rounded-2xl outline-none focus:ring-2 focus:ring-teal-100 transition-all text-sm font-semibold"
+            className="w-full p-5 bg-slate-50 border-none rounded-2xl outline-none text-sm font-semibold"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
           />
@@ -183,28 +131,28 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
         <input 
           type="email" 
           placeholder="Email Address" 
-          className="w-full p-5 bg-slate-50 border-none rounded-2xl outline-none focus:ring-2 focus:ring-teal-100 transition-all text-sm font-semibold"
+          className="w-full p-5 bg-slate-50 border-none rounded-2xl outline-none text-sm font-semibold"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
         <input 
           type="password" 
           placeholder="Password" 
-          className="w-full p-5 bg-slate-50 border-none rounded-2xl outline-none focus:ring-2 focus:ring-teal-100 transition-all text-sm font-semibold"
+          className="w-full p-5 bg-slate-50 border-none rounded-2xl outline-none text-sm font-semibold"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
         <button 
           onClick={handleAuth}
           disabled={isAuthLoading}
-          className="w-full py-5 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all flex justify-center items-center disabled:opacity-50"
+          className="w-full py-5 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl flex justify-center items-center disabled:opacity-50"
           style={{ backgroundColor: COLORS.primary }}
         >
           {isAuthLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : (isSignup ? 'Get Started' : 'Login')}
         </button>
 
         <button onClick={() => setIsSignup(!isSignup)} className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-2 block mx-auto">
-          {isSignup ? 'Already have an account? Login' : 'New to Queso? Join Now'}
+          {isSignup ? 'Login instead' : 'Join Now'}
         </button>
       </div>
     </div>
@@ -215,7 +163,6 @@ const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [isDataLoading, setIsDataLoading] = useState(false);
   
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -225,75 +172,11 @@ const App: React.FC = () => {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [notification, setNotification] = useState<{title: string, body: string} | null>(null);
 
-  useEffect(() => {
-    if (!isSupabaseConfigured) {
-      setIsInitializing(false);
-      return;
-    }
+  const refreshAllData = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const userId = user.id;
 
-    // Single source of truth for auth state
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, currentSession) => {
-      setSession(currentSession);
-      if (currentSession) {
-        fetchProfile(currentSession.user);
-      } else {
-        setProfile(null);
-        setTasks([]);
-        setEvents([]);
-        setNotes([]);
-        setDrafts([]);
-      }
-      setIsInitializing(false);
-    });
-
-    // Initial session check
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      if (initialSession) {
-        setSession(initialSession);
-        fetchProfile(initialSession.user);
-      }
-      // If no session, onAuthStateChange will still handle it, but we set initializing to false if none found
-      if (!initialSession) setIsInitializing(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const fetchProfile = async (user: any) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      
-      if (error && error.code === 'PGRST116') {
-        // Handle missing profile by creating one from metadata
-        const fullName = user.user_metadata?.full_name || user.user_metadata?.name || 'New User';
-        const { data: newProfile } = await supabase
-          .from('profiles')
-          .insert([{ id: user.id, full_name: fullName, plan: 'free' }])
-          .select()
-          .single();
-        setProfile(newProfile);
-      } else {
-        setProfile(data);
-      }
-    } catch (err) {
-      console.error("Profile fetch error", err);
-    }
-  };
-
-  useEffect(() => {
-    if (session?.user && isSupabaseConfigured) {
-      fetchAllData();
-    }
-  }, [session]);
-
-  const fetchAllData = async () => {
-    setIsDataLoading(true);
-    const userId = session.user.id;
-    
     try {
       const [tasksRes, eventsRes, notesRes, draftsRes, actionsRes] = await Promise.all([
         supabase.from('tasks').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
@@ -308,62 +191,108 @@ const App: React.FC = () => {
       if (notesRes.data) setNotes(notesRes.data);
       if (draftsRes.data) setDrafts(draftsRes.data);
       if (actionsRes.data) setActions(actionsRes.data);
-    } finally {
-      setIsDataLoading(false);
+    } catch (e) {
+      console.error("Cloud data sync failed", e);
     }
-  };
+  }, []);
+
+  const fetchProfile = useCallback(async (user: any) => {
+    try {
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      if (error || !data) {
+        console.warn("Profile missing, attempting self-healing creation...");
+        const fullName = user.user_metadata?.full_name || user.user_metadata?.name || 'New User';
+        const { data: newProfile, error: insErr } = await supabase.from('profiles')
+          .insert([{ id: user.id, full_name: fullName, plan: 'free' }])
+          .select()
+          .single();
+        
+        if (!insErr && newProfile) {
+          await supabase.from('subscriptions').insert([{ user_id: user.id, plan: 'free', status: 'active' }]);
+          setProfile(newProfile);
+        }
+      } else {
+        setProfile(data);
+      }
+      refreshAllData();
+    } catch (err) {
+      console.error("Critical profile fetch failure", err);
+    }
+  }, [refreshAllData]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setIsInitializing(false);
+      return;
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, currentSession) => {
+      setSession(currentSession);
+      if (currentSession) {
+        fetchProfile(currentSession.user);
+      } else {
+        setProfile(null);
+      }
+      setIsInitializing(false);
+    });
+
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      if (initialSession) {
+        setSession(initialSession);
+        fetchProfile(initialSession.user);
+      }
+      setIsInitializing(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [fetchProfile]);
 
   useEffect(() => {
     localStorage.setItem('queso_chat', JSON.stringify(messages));
   }, [messages]);
 
-  const addAction = async (type: string, input: any) => {
-    if (!session?.user || !isSupabaseConfigured) return;
-    const { data } = await supabase
-      .from('assistant_actions')
-      .insert([{
-        user_id: session.user.id,
-        action_type: type,
-        input_payload: input,
-        result_payload: { status: 'success' }
-      }])
-      .select()
-      .single();
-    
-    if (data) setActions(prev => [data, ...prev]);
+  const addAction = async (type: string, input: any, result: any = { status: 'success' }) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('assistant_actions')
+        .insert([{
+          user_id: user.id,
+          action_type: type,
+          input_payload: input,
+          result_payload: result
+        }])
+        .select()
+        .single();
+      
+      if (data) setActions(prev => [data, ...prev]);
+      if (error) console.error("Persistence failed for audit log:", error);
+    } catch (e) {
+      console.error("Audit log exception:", e);
+    }
   };
 
   const silentCalendarSync = async (title: string, date: string | null) => {
-    if (!date || !session?.user || !isSupabaseConfigured) return;
-    const dateObj = new Date(date);
-    if (isNaN(dateObj.getTime())) return;
-
-    const startAt = dateObj.toISOString();
-    const endAt = new Date(dateObj.getTime() + 1800000).toISOString();
-
-    const { data: existing } = await supabase
-      .from('events')
-      .select('id')
-      .eq('user_id', session.user.id)
-      .eq('title', title)
-      .eq('start_at', startAt);
-
-    if (existing && existing.length > 0) return;
-
-    const { data } = await supabase
-      .from('events')
-      .insert([{
-        user_id: session.user.id,
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!date || !user) return;
+    try {
+      const startAt = new Date(date).toISOString();
+      const endAt = new Date(new Date(date).getTime() + 1800000).toISOString();
+      
+      const { data } = await supabase.from('events').insert([{
+        user_id: user.id,
         title: title,
-        description: 'Synchronized Ledger Entry',
+        description: 'AI Managed Sync',
         start_at: startAt,
-        end_at: endAt,
-        location: 'Cloud Sync'
-      }])
-      .select()
+        end_at: endAt
+      }]).select()
       .single();
 
-    if (data) setEvents(prev => [data, ...prev]);
+      if (data) setEvents(prev => [data, ...prev]);
+    } catch (e) {
+      console.error("Silent calendar sync failed", e);
+    }
   };
 
   const triggerNotification = (title: string, body: string) => {
@@ -372,22 +301,13 @@ const App: React.FC = () => {
   };
 
   const handleSignOut = async () => {
-    if (isSupabaseConfigured) await supabase.auth.signOut();
+    await supabase.auth.signOut();
     localStorage.clear();
     window.location.reload();
   };
 
   if (!isSupabaseConfigured) return <SupabaseConfigScreen />;
-  
-  if (isInitializing) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
-        <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="mt-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">Checking Authentication...</p>
-      </div>
-    );
-  }
-
+  if (isInitializing) return <div className="flex h-screen items-center justify-center font-black uppercase tracking-widest text-[10px] text-slate-400">Ledgering...</div>;
   if (!session) return <AuthScreen onAuthStarted={() => setIsInitializing(true)} />;
 
   return (
@@ -396,9 +316,7 @@ const App: React.FC = () => {
         {notification && (
           <div className="absolute top-6 left-4 right-4 z-[200] animate-in slide-in-from-top-12 duration-500">
             <div className="bg-white/95 backdrop-blur-xl border border-slate-200 p-4 rounded-3xl shadow-2xl flex items-center space-x-4">
-              <div className="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center text-white shrink-0">
-                <ICONS.Check className="w-6 h-6" />
-              </div>
+              <div className="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center text-white shrink-0"><ICONS.Check className="w-6 h-6" /></div>
               <div className="flex-1">
                 <h4 className="text-xs font-black text-slate-800">{notification.title}</h4>
                 <p className="text-[10px] text-slate-500 line-clamp-1">{notification.body}</p>
@@ -412,30 +330,21 @@ const App: React.FC = () => {
             <Route path="/" element={<Navigate to="/chat" />} />
             <Route path="/chat" element={
               <ChatScreen 
-                plan={profile?.plan || 'free'} 
-                messages={messages} 
-                setMessages={setMessages} 
-                onClearChat={() => {
-                  setMessages([]);
-                  localStorage.removeItem('queso_chat');
-                }}
-                setTasks={setTasks}
-                setEvents={setEvents}
-                setNotes={setNotes}
-                setDrafts={setDrafts}
-                triggerNotification={triggerNotification}
-                addAction={addAction}
-                syncToCalendar={silentCalendarSync}
+                plan={profile?.plan || 'free'} messages={messages} setMessages={setMessages} 
+                onClearChat={() => { setMessages([]); localStorage.removeItem('queso_chat'); }}
+                setTasks={setTasks} setEvents={setEvents} setNotes={setNotes} setDrafts={setDrafts}
+                triggerNotification={triggerNotification} addAction={addAction} syncToCalendar={silentCalendarSync}
+                refreshData={refreshAllData}
               />
             } />
             <Route path="/today" element={<TodayScreen plan={profile?.plan || 'free'} tasks={tasks} events={events} notes={notes} />} />
             <Route path="/tasks" element={<TasksScreen plan={profile?.plan || 'free'} tasks={tasks} setTasks={setTasks} addAction={addAction} syncToCalendar={silentCalendarSync} />} />
-            <Route path="/calendar" element={<CalendarScreen events={events} setEvents={setEvents} addAction={addAction} />} />
             <Route path="/notes" element={<NotesScreen plan={profile?.plan || 'free'} notes={notes} setNotes={setNotes} addAction={addAction} syncToCalendar={silentCalendarSync} />} />
-            <Route path="/drafts/:id" element={<DraftsScreen plan={profile?.plan || 'free'} drafts={drafts} triggerNotification={triggerNotification} addAction={addAction} />} />
+            <Route path="/calendar" element={<CalendarScreen events={events} setEvents={setEvents} addAction={addAction} />} />
+            <Route path="/audit" element={<AuditLogScreen actions={actions} />} />
             <Route path="/settings" element={<SettingsScreen profile={{...profile, email: session.user.email, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`} } setProfile={setProfile} onSignOut={handleSignOut} addAction={addAction} />} />
             <Route path="/paywall" element={<PaywallScreen profile={profile} setProfile={setProfile} />} />
-            <Route path="/audit" element={<AuditLogScreen actions={actions} />} />
+            <Route path="/drafts/:id" element={<DraftsScreen plan={profile?.plan || 'free'} drafts={drafts} triggerNotification={triggerNotification} addAction={addAction} />} />
           </Routes>
         </main>
 
