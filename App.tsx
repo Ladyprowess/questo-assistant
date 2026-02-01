@@ -644,15 +644,10 @@ const App: React.FC = () => {
         <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
         <p className="mt-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">Checking Authentication...</p>
       </div>
-
-      
     );
   }
-  const RequireAuth: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    if (!session) return <AuthScreen onAuthStarted={() => setIsInitializing(true)} />;
-    return <>{children}</>;
-  };
-  
+
+  if (!session) return <AuthScreen onAuthStarted={() => setIsInitializing(true)} />;
 
   return (
     <HashRouter>
