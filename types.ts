@@ -38,6 +38,8 @@ export interface CalendarEvent {
   location: string | null;
   attendees: any[];
   source: EventSource;
+  // UI-only property to track sync status in deduplicated lists
+  isSynced?: boolean;
   created_at: string;
   updated_at: string;
 }

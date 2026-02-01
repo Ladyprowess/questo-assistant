@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { ICONS, COLORS } from '../constants';
 import { Task } from '../types';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../services/supabase';
 
 interface TasksScreenProps {
   plan: string;
@@ -18,15 +19,31 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
   const [isEditing, setIsEditing] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [formTask, setFormTask] = useState({ title: '', due_at: '', recurring: 'none' });
+  const [isLoading, setIsLoading] = useState(false);
 
-  const toggleStatus = (id: string, e: React.MouseEvent) => {
+  const toggleStatus = async (task: Task, e: React.MouseEvent) => {
     e.stopPropagation();
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status: t.status === 'done' ? 'todo' : 'done' } : t));
-    addAction('toggle_task', { id });
+    const newStatus = task.status === 'done' ? 'todo' : 'done';
+    const { data, error } = await supabase
+      .from('tasks')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', task.id)
+      .select()
+      .single();
+    
+    if (data) {
+      setTasks(prev => prev.map(t => t.id === task.id ? data : t));
+      addAction('toggle_task', { id: task.id });
+    }
   };
 
-  const handleSaveTask = () => {
-    if (!formTask.title.trim()) return;
+  const handleSaveTask = async () => {
+    if (!formTask.title.trim() || isLoading) return;
+    setIsLoading(true);
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
     const taskDue = formTask.due_at ? new Date(formTask.due_at).toISOString() : new Date().toISOString();
     
     if (formTask.recurring !== 'none' && plan !== 'pro') {
@@ -34,37 +51,54 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
       return;
     }
 
-    if (isEditing && selectedTask) {
-      setTasks(prev => prev.map(t => t.id === selectedTask.id ? { 
-        ...t, 
-        title: formTask.title, 
-        due_at: taskDue, 
-        recurring_rule: formTask.recurring !== 'none' ? `FREQ=${formTask.recurring.toUpperCase()}` : null,
-        updated_at: new Date().toISOString()
-      } : t));
-      addAction('manual_task_update', { id: selectedTask.id });
-    } else {
-      const task: Task = {
-        id: 't-' + Date.now(),
-        user_id: 'u1',
-        title: formTask.title,
-        description: 'Action Item',
-        due_at: taskDue,
-        priority: 'medium',
-        status: 'todo',
-        recurring_rule: formTask.recurring !== 'none' ? `FREQ=${formTask.recurring.toUpperCase()}` : null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      setTasks(prev => [task, ...prev]);
-      addAction('manual_task_create', { title: formTask.title });
+    try {
+      if (isEditing && selectedTask) {
+        const { data, error } = await supabase
+          .from('tasks')
+          .update({ 
+            title: formTask.title, 
+            due_at: taskDue, 
+            recurring_rule: formTask.recurring !== 'none' ? `FREQ=${formTask.recurring.toUpperCase()}` : null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', selectedTask.id)
+          .select()
+          .single();
+          
+        if (data) {
+          setTasks(prev => prev.map(t => t.id === selectedTask.id ? data : t));
+          addAction('manual_task_update', { id: selectedTask.id });
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('tasks')
+          .insert([{
+            user_id: user.id,
+            title: formTask.title,
+            description: 'Action Item',
+            due_at: taskDue,
+            priority: 'medium',
+            status: 'todo',
+            recurring_rule: formTask.recurring !== 'none' ? `FREQ=${formTask.recurring.toUpperCase()}` : null
+          }])
+          .select()
+          .single();
+          
+        if (data) {
+          setTasks(prev => [data, ...prev]);
+          addAction('manual_task_create', { title: formTask.title });
+          syncToCalendar(formTask.title, taskDue);
+        }
+      }
+      setIsCreating(false);
+      setIsEditing(false);
+      setSelectedTask(null);
+      setFormTask({ title: '', due_at: '', recurring: 'none' });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
     }
-
-    syncToCalendar(formTask.title, taskDue);
-    setIsCreating(false);
-    setIsEditing(false);
-    setSelectedTask(null);
-    setFormTask({ title: '', due_at: '', recurring: 'none' });
   };
 
   const startEditing = (task: Task) => {
@@ -77,11 +111,14 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
     });
   };
 
-  const deleteTask = (id: string) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
-    addAction('manual_task_delete', { id });
-    setIsEditing(false);
-    setSelectedTask(null);
+  const deleteTask = async (id: string) => {
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (!error) {
+      setTasks(prev => prev.filter(t => t.id !== id));
+      addAction('manual_task_delete', { id });
+      setIsEditing(false);
+      setSelectedTask(null);
+    }
   };
 
   return (
@@ -101,7 +138,7 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
             onClick={() => startEditing(task)}
             className={`p-5 rounded-[28px] border flex items-center space-x-4 transition-all cursor-pointer ${task.status === 'done' ? 'bg-slate-50 opacity-60' : 'bg-white border-slate-100 shadow-sm'}`}
           >
-            <div onClick={(e) => toggleStatus(task.id, e)} className={`w-7 h-7 rounded-full border-2 flex items-center justify-center cursor-pointer ${task.status === 'done' ? 'bg-teal-500 border-teal-500' : 'border-slate-200 hover:border-teal-300'}`}>{task.status === 'done' && <ICONS.Check className="w-4 h-4 text-white" strokeWidth={4} />}</div>
+            <div onClick={(e) => toggleStatus(task, e)} className={`w-7 h-7 rounded-full border-2 flex items-center justify-center cursor-pointer ${task.status === 'done' ? 'bg-teal-500 border-teal-500' : 'border-slate-200 hover:border-teal-300'}`}>{task.status === 'done' && <ICONS.Check className="w-4 h-4 text-white" strokeWidth={4} />}</div>
             <div className="flex-1 text-left truncate">
               <h4 className={`text-sm font-bold truncate ${task.status === 'done' ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{task.title}</h4>
               <div className="flex items-center space-x-2">
@@ -146,8 +183,8 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
                 {isEditing && (
                   <button onClick={() => deleteTask(selectedTask!.id)} className="flex-1 py-4 bg-red-50 text-red-500 rounded-2xl font-black uppercase text-[10px] tracking-widest">Delete</button>
                 )}
-                <button onClick={handleSaveTask} className="flex-[2] py-5 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all" style={{ backgroundColor: COLORS.primary }}>
-                  {isEditing ? 'Save Changes' : 'Record Task'}
+                <button onClick={handleSaveTask} disabled={isLoading} className="flex-[2] py-5 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all flex justify-center items-center" style={{ backgroundColor: COLORS.primary }}>
+                  {isLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : (isEditing ? 'Save Changes' : 'Record Task')}
                 </button>
               </div>
               <button onClick={() => { setIsCreating(false); setIsEditing(false); }} className="w-full py-2 text-slate-400 font-black uppercase text-[10px] tracking-widest mt-2">Close Panel</button>

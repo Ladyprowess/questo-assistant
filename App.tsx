@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { ICONS, COLORS } from './constants';
 import { Task, CalendarEvent, Note, AssistantAction, Draft } from './types';
+import { supabase, isSupabaseConfigured, saveSupabaseConfig } from './services/supabase';
 
 // Screens
 import ChatScreen from './screens/ChatScreen';
@@ -30,27 +31,117 @@ export const COUNTRY_TIMEZONES: Record<string, string> = {
   'UAE': 'Asia/Dubai',
 };
 
-const AuthScreen: React.FC<{ onLogin: (user: any) => void }> = ({ onLogin }) => {
+const SupabaseConfigScreen: React.FC = () => {
+  const [url, setUrl] = useState('');
+  const [key, setKey] = useState('');
+
+  const handleSave = () => {
+    if (url && key) {
+      saveSupabaseConfig(url, key);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 p-8 text-center text-white">
+      <div className="w-20 h-20 rounded-[28px] bg-teal-600 flex items-center justify-center mb-8 shadow-2xl">
+        <ICONS.Settings className="w-10 h-10 text-white" />
+      </div>
+      <h1 className="text-3xl font-black mb-4">Connect Supabase</h1>
+      <p className="text-slate-400 text-sm mb-8 leading-relaxed max-w-xs">
+        Configuration missing. Enter your Supabase project details to enable the cloud ledger and sync features.
+      </p>
+      
+      <div className="w-full max-w-sm space-y-4">
+        <div className="text-left">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block ml-4">Project URL</label>
+          <input 
+            type="text" 
+            placeholder="https://xyz.supabase.co" 
+            className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-teal-500 transition-all text-sm"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </div>
+        <div className="text-left">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block ml-4">Anon Key</label>
+          <input 
+            type="password" 
+            placeholder="eyJhbGciOiJIUzI1NiIsInR5c..." 
+            className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl outline-none focus:ring-2 focus:ring-teal-500 transition-all text-sm"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+          />
+        </div>
+        <button 
+          onClick={handleSave}
+          className="w-full py-5 bg-teal-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all mt-4"
+        >
+          Initialize Sync
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) => {
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const handleAuth = async (isGoogle = false) => {
+  const handleAuth = async () => {
+    if (!isSupabaseConfigured) return;
     setIsAuthLoading(true);
-    setTimeout(() => {
-      onLogin({ 
-        id: 'u-' + Date.now(), 
-        full_name: isGoogle ? "Google User" : (fullName || email.split('@')[0]), 
-        email: isGoogle ? "google.user@gmail.com" : email, 
-        avatar: isGoogle ? `https://api.dicebear.com/7.x/avataaars/svg?seed=google` : `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`,
-        plan: 'free',
-        country: 'Nigeria',
-        timezone: 'Africa/Lagos',
-        auth_provider: isGoogle ? 'google' : 'email'
-      });
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      if (isSignup) {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { full_name: fullName },
+            emailRedirectTo: window.location.origin
+          }
+        });
+        if (error) throw error;
+        if (data?.user && !data.session) {
+          setSuccessMsg("Account created! Check your email for a confirmation link.");
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
       setIsAuthLoading(false);
-    }, 1200);
+    }
+  };
+
+  const handleGoogleAuth = async () => {
+    if (!isSupabaseConfigured) return;
+    setIsAuthLoading(true);
+    onAuthStarted();
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setError(err.message);
+      setIsAuthLoading(false);
+    }
   };
 
   return (
@@ -59,13 +150,16 @@ const AuthScreen: React.FC<{ onLogin: (user: any) => void }> = ({ onLogin }) => 
         <span className="text-white text-4xl font-black italic">Q</span>
       </div>
       <h1 className="text-3xl font-black mb-2 text-slate-900">{isSignup ? 'Create Account' : 'Sign In'}</h1>
-      <p className="text-slate-400 text-sm mb-12 font-medium italic">Your private virtual assistant.</p>
+      <p className="text-slate-400 text-sm mb-8 font-medium italic">Your private virtual assistant.</p>
       
       <div className="w-full space-y-4 max-w-sm">
+        {error && <div className="p-4 bg-red-50 text-red-600 text-xs font-bold rounded-2xl mb-4">{error}</div>}
+        {successMsg && <div className="p-4 bg-teal-50 text-teal-600 text-xs font-bold rounded-2xl mb-4">{successMsg}</div>}
+        
         <button 
-          onClick={() => handleAuth(true)}
+          onClick={handleGoogleAuth}
           disabled={isAuthLoading}
-          className="w-full flex items-center justify-center space-x-3 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 mb-2"
+          className="w-full flex items-center justify-center space-x-3 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 mb-2 disabled:opacity-50"
         >
           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
           <span className="text-sm font-bold text-slate-700">Continue with Google</span>
@@ -93,10 +187,17 @@ const AuthScreen: React.FC<{ onLogin: (user: any) => void }> = ({ onLogin }) => 
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
+        <input 
+          type="password" 
+          placeholder="Password" 
+          className="w-full p-5 bg-slate-50 border-none rounded-2xl outline-none focus:ring-2 focus:ring-teal-100 transition-all text-sm font-semibold"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
         <button 
-          onClick={() => handleAuth(false)}
+          onClick={handleAuth}
           disabled={isAuthLoading}
-          className="w-full py-5 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all flex justify-center items-center"
+          className="w-full py-5 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all flex justify-center items-center disabled:opacity-50"
           style={{ backgroundColor: COLORS.primary }}
         >
           {isAuthLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : (isSignup ? 'Get Started' : 'Login')}
@@ -111,66 +212,158 @@ const AuthScreen: React.FC<{ onLogin: (user: any) => void }> = ({ onLogin }) => 
 };
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<any | null>(() => {
-    const saved = localStorage.getItem('queso_user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [session, setSession] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [isDataLoading, setIsDataLoading] = useState(false);
   
-  const [tasks, setTasks] = useState<Task[]>(() => JSON.parse(localStorage.getItem('queso_tasks') || '[]'));
-  const [events, setEvents] = useState<CalendarEvent[]>(() => JSON.parse(localStorage.getItem('queso_events') || '[]'));
-  const [notes, setNotes] = useState<Note[]>(() => JSON.parse(localStorage.getItem('queso_notes') || '[]'));
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [messages, setMessages] = useState<any[]>(() => JSON.parse(localStorage.getItem('queso_chat') || '[]'));
-  const [actions, setActions] = useState<AssistantAction[]>(() => JSON.parse(localStorage.getItem('queso_actions') || '[]'));
-  const [drafts, setDrafts] = useState<Draft[]>(() => JSON.parse(localStorage.getItem('queso_drafts') || '[]'));
+  const [actions, setActions] = useState<AssistantAction[]>([]);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [notification, setNotification] = useState<{title: string, body: string} | null>(null);
 
   useEffect(() => {
-    if (user) localStorage.setItem('queso_user', JSON.stringify(user));
-    localStorage.setItem('queso_tasks', JSON.stringify(tasks));
-    localStorage.setItem('queso_events', JSON.stringify(events));
-    localStorage.setItem('queso_notes', JSON.stringify(notes));
-    localStorage.setItem('queso_chat', JSON.stringify(messages));
-    localStorage.setItem('queso_actions', JSON.stringify(actions));
-    localStorage.setItem('queso_drafts', JSON.stringify(drafts));
-  }, [user, tasks, events, notes, messages, actions, drafts]);
+    if (!isSupabaseConfigured) {
+      setIsInitializing(false);
+      return;
+    }
 
-  const addAction = (type: string, input: any) => {
-    const newAction: AssistantAction = {
-      id: 'a-' + Date.now(),
-      user_id: user?.id || 'u1',
-      action_type: type,
-      input_payload: input,
-      result_payload: { status: 'success' },
-      created_at: new Date().toISOString(),
-    };
-    setActions(prev => [newAction, ...prev]);
+    // Single source of truth for auth state
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, currentSession) => {
+      setSession(currentSession);
+      if (currentSession) {
+        fetchProfile(currentSession.user);
+      } else {
+        setProfile(null);
+        setTasks([]);
+        setEvents([]);
+        setNotes([]);
+        setDrafts([]);
+      }
+      setIsInitializing(false);
+    });
+
+    // Initial session check
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      if (initialSession) {
+        setSession(initialSession);
+        fetchProfile(initialSession.user);
+      }
+      // If no session, onAuthStateChange will still handle it, but we set initializing to false if none found
+      if (!initialSession) setIsInitializing(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchProfile = async (user: any) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (error && error.code === 'PGRST116') {
+        // Handle missing profile by creating one from metadata
+        const fullName = user.user_metadata?.full_name || user.user_metadata?.name || 'New User';
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .insert([{ id: user.id, full_name: fullName, plan: 'free' }])
+          .select()
+          .single();
+        setProfile(newProfile);
+      } else {
+        setProfile(data);
+      }
+    } catch (err) {
+      console.error("Profile fetch error", err);
+    }
   };
 
-  const silentCalendarSync = (title: string, date: string | null) => {
-    if (!date || !user) return;
+  useEffect(() => {
+    if (session?.user && isSupabaseConfigured) {
+      fetchAllData();
+    }
+  }, [session]);
+
+  const fetchAllData = async () => {
+    setIsDataLoading(true);
+    const userId = session.user.id;
+    
+    try {
+      const [tasksRes, eventsRes, notesRes, draftsRes, actionsRes] = await Promise.all([
+        supabase.from('tasks').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+        supabase.from('events').select('*').eq('user_id', userId).order('start_at', { ascending: true }),
+        supabase.from('notes').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+        supabase.from('drafts').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+        supabase.from('assistant_actions').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+      ]);
+
+      if (tasksRes.data) setTasks(tasksRes.data);
+      if (eventsRes.data) setEvents(eventsRes.data);
+      if (notesRes.data) setNotes(notesRes.data);
+      if (draftsRes.data) setDrafts(draftsRes.data);
+      if (actionsRes.data) setActions(actionsRes.data);
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    localStorage.setItem('queso_chat', JSON.stringify(messages));
+  }, [messages]);
+
+  const addAction = async (type: string, input: any) => {
+    if (!session?.user || !isSupabaseConfigured) return;
+    const { data } = await supabase
+      .from('assistant_actions')
+      .insert([{
+        user_id: session.user.id,
+        action_type: type,
+        input_payload: input,
+        result_payload: { status: 'success' }
+      }])
+      .select()
+      .single();
+    
+    if (data) setActions(prev => [data, ...prev]);
+  };
+
+  const silentCalendarSync = async (title: string, date: string | null) => {
+    if (!date || !session?.user || !isSupabaseConfigured) return;
     const dateObj = new Date(date);
-    const timestamp = dateObj.getTime();
-    if (isNaN(timestamp)) return;
+    if (isNaN(dateObj.getTime())) return;
 
-    setEvents(prev => {
-      const alreadySynced = prev.some(e => e.source === 'google_calendar' && e.title === title && new Date(e.start_at).getTime() === timestamp);
-      if (alreadySynced) return prev;
+    const startAt = dateObj.toISOString();
+    const endAt = new Date(dateObj.getTime() + 1800000).toISOString();
 
-      const syncedEvent: CalendarEvent = {
-        id: 'gsync-' + Math.random().toString(36).substring(2, 9),
-        user_id: user.id,
-        title: title, 
+    const { data: existing } = await supabase
+      .from('events')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .eq('title', title)
+      .eq('start_at', startAt);
+
+    if (existing && existing.length > 0) return;
+
+    const { data } = await supabase
+      .from('events')
+      .insert([{
+        user_id: session.user.id,
+        title: title,
         description: 'Synchronized Ledger Entry',
-        start_at: dateObj.toISOString(),
-        end_at: new Date(timestamp + 1800000).toISOString(),
-        location: 'Cloud Sync',
-        attendees: [],
-        source: 'google_calendar',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      return [syncedEvent, ...prev];
-    });
+        start_at: startAt,
+        end_at: endAt,
+        location: 'Cloud Sync'
+      }])
+      .select()
+      .single();
+
+    if (data) setEvents(prev => [data, ...prev]);
   };
 
   const triggerNotification = (title: string, body: string) => {
@@ -178,13 +371,24 @@ const App: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  const handleSignOut = () => {
-    setUser(null);
+  const handleSignOut = async () => {
+    if (isSupabaseConfigured) await supabase.auth.signOut();
     localStorage.clear();
     window.location.reload();
   };
 
-  if (!user) return <AuthScreen onLogin={setUser} />;
+  if (!isSupabaseConfigured) return <SupabaseConfigScreen />;
+  
+  if (isInitializing) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50">
+        <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="mt-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">Checking Authentication...</p>
+      </div>
+    );
+  }
+
+  if (!session) return <AuthScreen onAuthStarted={() => setIsInitializing(true)} />;
 
   return (
     <HashRouter>
@@ -208,10 +412,13 @@ const App: React.FC = () => {
             <Route path="/" element={<Navigate to="/chat" />} />
             <Route path="/chat" element={
               <ChatScreen 
-                plan={user.plan} 
+                plan={profile?.plan || 'free'} 
                 messages={messages} 
                 setMessages={setMessages} 
-                onClearChat={() => setMessages([])}
+                onClearChat={() => {
+                  setMessages([]);
+                  localStorage.removeItem('queso_chat');
+                }}
                 setTasks={setTasks}
                 setEvents={setEvents}
                 setNotes={setNotes}
@@ -221,13 +428,13 @@ const App: React.FC = () => {
                 syncToCalendar={silentCalendarSync}
               />
             } />
-            <Route path="/today" element={<TodayScreen plan={user.plan} tasks={tasks} events={events} notes={notes} />} />
-            <Route path="/tasks" element={<TasksScreen plan={user.plan} tasks={tasks} setTasks={setTasks} addAction={addAction} syncToCalendar={silentCalendarSync} />} />
+            <Route path="/today" element={<TodayScreen plan={profile?.plan || 'free'} tasks={tasks} events={events} notes={notes} />} />
+            <Route path="/tasks" element={<TasksScreen plan={profile?.plan || 'free'} tasks={tasks} setTasks={setTasks} addAction={addAction} syncToCalendar={silentCalendarSync} />} />
             <Route path="/calendar" element={<CalendarScreen events={events} setEvents={setEvents} addAction={addAction} />} />
-            <Route path="/notes" element={<NotesScreen plan={user.plan} notes={notes} setNotes={setNotes} addAction={addAction} syncToCalendar={silentCalendarSync} />} />
-            <Route path="/drafts/:id" element={<DraftsScreen plan={user.plan} drafts={drafts} triggerNotification={triggerNotification} addAction={addAction} />} />
-            <Route path="/settings" element={<SettingsScreen profile={user} setProfile={setUser} onSignOut={handleSignOut} addAction={addAction} />} />
-            <Route path="/paywall" element={<PaywallScreen profile={user} setProfile={setUser} />} />
+            <Route path="/notes" element={<NotesScreen plan={profile?.plan || 'free'} notes={notes} setNotes={setNotes} addAction={addAction} syncToCalendar={silentCalendarSync} />} />
+            <Route path="/drafts/:id" element={<DraftsScreen plan={profile?.plan || 'free'} drafts={drafts} triggerNotification={triggerNotification} addAction={addAction} />} />
+            <Route path="/settings" element={<SettingsScreen profile={{...profile, email: session.user.email, avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`} } setProfile={setProfile} onSignOut={handleSignOut} addAction={addAction} />} />
+            <Route path="/paywall" element={<PaywallScreen profile={profile} setProfile={setProfile} />} />
             <Route path="/audit" element={<AuditLogScreen actions={actions} />} />
           </Routes>
         </main>

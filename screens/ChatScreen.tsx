@@ -5,6 +5,7 @@ import { ICONS, COLORS } from '../constants';
 import { useNavigate } from 'react-router-dom';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { Task, CalendarEvent, Note, Draft } from '../types';
+import { supabase } from '../services/supabase';
 
 interface Message {
   id: string;
@@ -31,7 +32,6 @@ function decode(base64: string) {
 }
 
 async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number) {
-  // Ensure we have a clean buffer copy
   const bufferCopy = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
   const dataInt16 = new Int16Array(bufferCopy);
   const frameCount = dataInt16.length / numChannels;
@@ -105,7 +105,79 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     localStorage.setItem(`queso_msg_count_${today}`, count.toString());
   };
 
-  // Implement handleSend to process text messages and integrate with Gemini
+  const executeFunction = async (name: string, args: any) => {
+    addAction(name, args);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: "No authenticated user" };
+
+    if (name === 'create_task') {
+      const { data, error } = await supabase.from('tasks').insert([{
+        user_id: user.id,
+        title: args.title,
+        description: args.description || '',
+        due_at: args.due_at,
+        priority: args.priority || 'medium'
+      }]).select().single();
+      
+      if (data) {
+        setTasks(prev => [data, ...prev]);
+        syncToCalendar(args.title, args.due_at);
+        triggerNotification("Task Ledgered", args.title);
+      }
+      return { result: "Task created" };
+    }
+
+    if (name === 'create_note') {
+      const { data, error } = await supabase.from('notes').insert([{
+        user_id: user.id,
+        title: args.title,
+        content: args.content,
+        scheduled_at: args.scheduled_at
+      }]).select().single();
+
+      if (data) {
+        setNotes(prev => [data, ...prev]);
+        syncToCalendar(`Note: ${args.title}`, args.scheduled_at);
+        triggerNotification("Intel Recorded", args.title);
+      }
+      return { result: "Note created" };
+    }
+
+    if (name === 'create_event') {
+      const { data, error } = await supabase.from('events').insert([{
+        user_id: user.id,
+        title: args.title,
+        start_at: args.start_at,
+        end_at: args.end_at,
+        location: args.location || ''
+      }]).select().single();
+
+      if (data) {
+        setEvents(prev => [data, ...prev]);
+        syncToCalendar(args.title, args.start_at);
+        triggerNotification("Event Locked", args.title);
+      }
+      return { result: "Event created" };
+    }
+
+    if (name === 'draft_message') {
+      const { data, error } = await supabase.from('drafts').insert([{
+        user_id: user.id,
+        channel: args.channel || 'email',
+        recipient: args.recipient || '',
+        subject: args.subject || '',
+        body: args.body
+      }]).select().single();
+
+      if (data) {
+        setDrafts(prev => [data, ...prev]);
+        return { result: "Draft produced", draftId: data.id };
+      }
+      return { result: "Draft failed" };
+    }
+    return { result: "Process complete" };
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     
@@ -140,14 +212,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       let isAction = false;
       let draftId = undefined;
 
-      // Handle function calling for non-streaming text response
       if (response.functionCalls && response.functionCalls.length > 0) {
         for (const fc of response.functionCalls) {
-          const executionResult = executeFunction(fc.name, fc.args);
+          const executionResult: any = await executeFunction(fc.name, fc.args);
           isAction = true;
-          if (executionResult && (executionResult as any).draftId) {
-            draftId = (executionResult as any).draftId;
-          }
+          if (executionResult?.draftId) draftId = executionResult.draftId;
         }
       }
 
@@ -167,87 +236,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const executeFunction = (name: string, args: any) => {
-    addAction(name, args);
-    const nowISO = new Date().toISOString();
-
-    if (name === 'create_task') {
-      const taskDue = args.due_at || nowISO;
-      const task: Task = {
-        id: 't-' + Date.now() + Math.random().toString(36).substr(2, 4),
-        user_id: 'u1',
-        title: args.title,
-        description: args.description || '',
-        due_at: taskDue,
-        priority: args.priority || 'medium',
-        status: 'todo',
-        recurring_rule: plan === 'pro' ? args.recurring_rule : null,
-        created_at: nowISO,
-        updated_at: nowISO
-      };
-      setTasks(prev => [task, ...prev]);
-      syncToCalendar(args.title, taskDue);
-      triggerNotification("Task Ledgered", `${args.title} for ${new Date(taskDue).toLocaleString()}`);
-      return { result: `Task ledgered for ${new Date(taskDue).toLocaleString()}.` };
-    }
-
-    if (name === 'create_note') {
-      const noteDate = args.scheduled_at || nowISO;
-      const note: Note = {
-        id: 'n-' + Date.now() + Math.random().toString(36).substr(2, 4),
-        user_id: 'u1',
-        title: args.title,
-        content: args.content,
-        tags: [],
-        scheduled_at: noteDate,
-        created_at: nowISO,
-        updated_at: nowISO
-      };
-      setNotes(prev => [note, ...prev]);
-      syncToCalendar(`Note: ${args.title}`, noteDate);
-      triggerNotification("Intel Recorded", args.title);
-      return { result: `Information saved to ledger.` };
-    }
-
-    if (name === 'create_event') {
-      const eventStart = args.start_at || nowISO;
-      const event: CalendarEvent = {
-        id: 'e-' + Date.now() + Math.random().toString(36).substr(2, 4),
-        user_id: 'u1',
-        title: args.title,
-        description: args.description || '',
-        start_at: eventStart,
-        end_at: args.end_at || new Date(new Date(eventStart).getTime() + 1800000).toISOString(),
-        location: args.location || '',
-        attendees: [],
-        source: 'internal',
-        created_at: nowISO,
-        updated_at: nowISO
-      };
-      setEvents(prev => [event, ...prev]);
-      syncToCalendar(args.title, eventStart);
-      triggerNotification("Event Locked", args.title);
-      return { result: `Event ledgered for ${new Date(eventStart).toLocaleString()}.` };
-    }
-
-    if (name === 'draft_message') {
-      const draftId = 'd-' + Date.now();
-      const newDraft: Draft = {
-        id: draftId,
-        user_id: 'u1',
-        channel: args.channel || 'email',
-        recipient: args.recipient || '',
-        subject: args.subject || '',
-        body: args.body,
-        status: 'draft',
-        created_at: nowISO
-      };
-      setDrafts(prev => [newDraft, ...prev]);
-      return { result: "Draft produced.", draftId: draftId };
-    }
-    return { result: "Process complete." };
   };
 
   const stopVoiceMode = () => {
@@ -286,7 +274,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     setVoiceStatus('connecting');
 
     try {
-      // Create new instance right before use to ensure correct API key
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -304,27 +291,21 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           onopen: () => {
             setVoiceStatus('listening');
             const micSource = inputCtx.createMediaStreamSource(stream);
-            // ScriptProcessor needs to be connected to destination to fire onaudioprocess
             const processor = inputCtx.createScriptProcessor(2048, 1, 1);
             audioResourcesRef.current.processor = processor;
             
             processor.onaudioprocess = (e) => {
               if (!isVoiceActiveRef.current) return;
               const inputData = e.inputBuffer.getChannelData(0);
-              
-              // Low-overhead visual feedback calculation
               let sum = 0;
               for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
-              const level = Math.min(100, Math.sqrt(sum / inputData.length) * 400);
-              setAudioLevel(level);
+              setAudioLevel(Math.min(100, Math.sqrt(sum / inputData.length) * 400));
 
-              // Convert to 16-bit PCM
               const int16 = new Int16Array(inputData.length);
               for (let i = 0; i < inputData.length; i++) {
                 int16[i] = Math.max(-1, Math.min(1, inputData[i])) * 32767;
               }
               
-              // Use sessionPromise directly to avoid race conditions
               sessionPromise.then(s => { 
                 if (s && isVoiceActiveRef.current) {
                   s.sendRealtimeInput({ media: { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } }); 
@@ -335,14 +316,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
             processor.connect(inputCtx.destination);
           },
           onmessage: async (m: LiveServerMessage) => {
-            // 1. Handle Tools - Use object format for functionResponses
             if (m.toolCall) {
               for (const fc of m.toolCall.functionCalls) {
-                const result = executeFunction(fc.name, fc.args);
+                const result = await executeFunction(fc.name, fc.args);
                 sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: result } }));
               }
             }
-            // 2. Transcriptions
             if (m.serverContent?.inputTranscription) {
               userAccRef.current += m.serverContent.inputTranscription.text;
               setLiveUserText(userAccRef.current);
@@ -351,7 +330,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               assistantAccRef.current += m.serverContent.outputTranscription.text;
               setLiveAssistantText(assistantAccRef.current);
             }
-            // 3. Commit Turn to History
             if (m.serverContent?.turnComplete) {
               const finalU = cleanResponse(userAccRef.current);
               const finalA = cleanResponse(assistantAccRef.current);
@@ -369,7 +347,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               setLiveAssistantText('');
               setVoiceStatus('listening');
             }
-            // 4. Audio Playback
             const audioPart = m.serverContent?.modelTurn?.parts.find(p => p.inlineData);
             if (audioPart?.inlineData?.data) {
               setVoiceStatus('speaking');
@@ -381,7 +358,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
             }
-            // 5. Interruption
             if (m.serverContent?.interrupted) {
               nextStartTimeRef.current = outputCtx.currentTime;
               setVoiceStatus('listening');

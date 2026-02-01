@@ -2,52 +2,79 @@
 import React, { useState } from 'react';
 import { ICONS, COLORS } from '../constants';
 import { Note } from '../types';
+import { supabase } from '../services/supabase';
 
 const NotesScreen: React.FC<{ plan: string; notes: Note[]; setNotes: any; addAction: (t: string, i: any) => void; syncToCalendar: (title: string, date: string | null) => void }> = ({ plan, notes, setNotes, addAction, syncToCalendar }) => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [formNote, setFormNote] = useState({ title: '', content: '', scheduled_at: '' });
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSaveNote = () => {
-    if (!formNote.title.trim() || !formNote.content.trim()) return;
+  const handleSaveNote = async () => {
+    if (!formNote.title.trim() || !formNote.content.trim() || isLoading) return;
+    setIsLoading(true);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
     const noteTime = formNote.scheduled_at ? new Date(formNote.scheduled_at).toISOString() : new Date().toISOString();
     
-    if (isEditing && selectedNote) {
-      setNotes(prev => prev.map(n => n.id === selectedNote.id ? { 
-        ...n, 
-        title: formNote.title, 
-        content: formNote.content, 
-        scheduled_at: noteTime,
-        updated_at: new Date().toISOString()
-      } : n));
-      addAction('manual_note_update', { id: selectedNote.id });
-    } else {
-      const note: Note = {
-        id: `n${Date.now()}`,
-        user_id: 'u1',
-        title: formNote.title,
-        content: formNote.content,
-        tags: [],
-        scheduled_at: noteTime,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      setNotes([note, ...notes]);
-      addAction('manual_note_create', { title: formNote.title });
+    try {
+      if (isEditing && selectedNote) {
+        const { data, error } = await supabase
+          .from('notes')
+          .update({ 
+            title: formNote.title, 
+            content: formNote.content, 
+            scheduled_at: noteTime,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', selectedNote.id)
+          .select()
+          .single();
+          
+        if (data) {
+          setNotes(prev => prev.map(n => n.id === selectedNote.id ? data : n));
+          addAction('manual_note_update', { id: selectedNote.id });
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('notes')
+          .insert([{
+            user_id: user.id,
+            title: formNote.title,
+            content: formNote.content,
+            scheduled_at: noteTime
+          }])
+          .select()
+          .single();
+          
+        if (data) {
+          setNotes(prev => [data, ...prev]);
+          addAction('manual_note_create', { title: formNote.title });
+          syncToCalendar(`Note: ${formNote.title}`, noteTime);
+        }
+      }
+      
+      setFormNote({ title: '', content: '', scheduled_at: '' });
+      setIsCreating(false);
+      setIsEditing(false);
+      setSelectedNote(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
     }
-    
-    syncToCalendar(`Note: ${formNote.title}`, noteTime);
-    setFormNote({ title: '', content: '', scheduled_at: '' });
-    setIsCreating(false);
-    setIsEditing(false);
-    setSelectedNote(null);
   };
 
-  const deleteNote = (id: string) => {
-    setNotes(prev => prev.filter(n => n.id !== id));
-    addAction('manual_note_delete', { id });
-    setSelectedNote(null);
+  const deleteNote = async (id: string) => {
+    const { error } = await supabase.from('notes').delete().eq('id', id);
+    if (!error) {
+      setNotes(prev => prev.filter(n => n.id !== id));
+      addAction('manual_note_delete', { id });
+      setSelectedNote(null);
+    }
   };
 
   return (
@@ -96,7 +123,6 @@ const NotesScreen: React.FC<{ plan: string; notes: Note[]; setNotes: any; addAct
         )}
       </div>
 
-      {/* Note Detail Modal with Edit/Delete */}
       {selectedNote && !isEditing && (
         <div className="fixed inset-0 z-[110] bg-slate-900/50 backdrop-blur-md flex items-end animate-in fade-in duration-300 p-4">
           <div className="bg-white w-full max-w-md mx-auto rounded-[40px] p-8 pb-12 animate-in slide-in-from-bottom duration-300 max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -137,7 +163,6 @@ const NotesScreen: React.FC<{ plan: string; notes: Note[]; setNotes: any; addAct
         </div>
       )}
 
-      {/* Create/Edit Modal */}
       {(isCreating || isEditing) && (
         <div className="fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-md flex items-end animate-in fade-in duration-300 p-4">
           <div className="bg-white w-full max-w-md mx-auto rounded-[40px] p-8 pb-12 animate-in slide-in-from-bottom duration-300 shadow-2xl">
@@ -151,7 +176,9 @@ const NotesScreen: React.FC<{ plan: string; notes: Note[]; setNotes: any; addAct
               <input type="text" placeholder="Title" value={formNote.title} onChange={e => setFormNote({...formNote, title: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-4 px-6 text-sm focus:ring-4 focus:ring-teal-100 transition-all outline-none font-bold" />
               <input type="datetime-local" value={formNote.scheduled_at} onChange={e => setFormNote({...formNote, scheduled_at: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-4 px-6 text-sm focus:ring-4 focus:ring-teal-100 transition-all outline-none font-bold" />
               <textarea placeholder="Write everything down..." rows={5} value={formNote.content} onChange={e => setFormNote({...formNote, content: e.target.value})} className="w-full bg-slate-50 border-none rounded-2xl py-4 px-6 text-sm focus:ring-4 focus:ring-teal-100 transition-all outline-none resize-none" />
-              <button onClick={handleSaveNote} className="w-full py-4 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all" style={{ backgroundColor: COLORS.primary }}>{isEditing ? 'Update & Sync' : 'Save & Sync'}</button>
+              <button onClick={handleSaveNote} disabled={isLoading} className="w-full py-4 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all flex justify-center items-center" style={{ backgroundColor: COLORS.primary }}>
+                {isLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : (isEditing ? 'Update & Sync' : 'Save & Sync')}
+              </button>
             </div>
           </div>
         </div>
