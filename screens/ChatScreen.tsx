@@ -125,6 +125,57 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const sessionRef = useRef<any>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
+  // ---------- CREDITS (Supabase-owned) ----------
+const [credits, setCredits] = useState<number | null>(null);
+
+const loadCredits = async () => {
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabase.auth.getUser();
+
+  if (authErr || !user) {
+    setCredits(null);
+    return;
+  }
+
+  await ensureProfileExists(user);
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('credits')
+    .eq('id', user.id)
+    .single();
+
+  if (error) {
+    console.error('Failed to load credits:', error);
+    setCredits(0);
+    return;
+  }
+
+  setCredits(typeof data?.credits === 'number' ? data.credits : 0);
+};
+
+const decrementCredits = async () => {
+  // Pro users shouldn’t be blocked by credits
+  if (isPro) return;
+
+  const { data, error } = await supabase.rpc('decrement_credits');
+
+  if (error) {
+    console.error('Failed to decrement credits:', error);
+    // fail-safe: don’t silently allow infinite usage if decrement is broken
+    setCredits((prev) => (typeof prev === 'number' ? prev : 0));
+    return;
+  }
+
+  // rpc returns the new integer credits value
+  setCredits(typeof data === 'number' ? data : 0);
+};
+
+
+
+
   const audioResourcesRef = useRef<{
     inputCtx: AudioContext | null;
     outputCtx: AudioContext | null;
@@ -141,27 +192,24 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- DAILY LIMIT ----------
-  const getDailyMessageCount = () => {
-    const today = new Date().toDateString();
-    return parseInt(localStorage.getItem(`queso_msg_count_${today}`) || '0');
-  };
-
-  const incrementMessageCount = () => {
-    const today = new Date().toDateString();
-    const count = getDailyMessageCount() + 1;
-    localStorage.setItem(`queso_msg_count_${today}`, count.toString());
-  };
 
   const ensureProfileExists = async (user: any) => {
     const { data: profile } = await supabase.from('profiles').select('id').eq('id', user.id).single();
     if (!profile) {
       console.warn('Tool execution: Profile missing, auto-generating...');
       const fullName = user.user_metadata?.full_name || 'Queso User';
-      await supabase.from('profiles').insert([{ id: user.id, full_name: fullName, plan: 'free' }]);
+      await supabase.from('profiles').insert([
+        { id: user.id, full_name: fullName, plan: 'free', credits: 20 }
+      ]);
+      
       await supabase.from('subscriptions').insert([{ user_id: user.id, plan: 'free', status: 'active' }]);
     }
   };
+
+  useEffect(() => {
+    loadCredits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPro]);
 
   // ---------- SUCCESS MESSAGES ----------
   const successCopy = (type: 'task' | 'note' | 'event' | 'draft', title: string) => {
@@ -341,11 +389,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       return;
     }
 
-    // Free limit only applies to free users
-    if (!isPro && getDailyMessageCount() >= 20) {
+    if (!isPro && credits === null) {
+      await loadCredits();
+    }
+    if (!isPro && (credits ?? 0) <= 0) {
       navigate('/app/paywall');
       return;
     }
+    
+    
 
     setIsVoiceActive(true);
     isVoiceActiveRef.current = true;
@@ -434,7 +486,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                   ...(finalA ? [{ id: `va-${Date.now()}`, role: 'assistant' as const, content: finalA, timestamp: now }] : [])
                 ]);
 
-                incrementMessageCount();
+                if (finalU) await decrementCredits();
+
                 triggerNotification('Voice saved', 'Your voice message was captured and added to chat.');
               }
 
@@ -503,10 +556,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
-    if (!isPro && getDailyMessageCount() >= 20) {
-      navigate('/app/paywall');
-      return;
-    }
+    if (!isPro && (credits ?? 0) <= 0) {
+  navigate('/app/paywall');
+  return;
+}
+
 
     const now = new Date();
 
@@ -522,7 +576,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     const currentInput = input;
     setInput('');
     setIsLoading(true);
-    incrementMessageCount();
+
 
     try {
       const history = [...messages, userMessage].slice(-10).map(m => ({
@@ -531,6 +585,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
       }));
 
       const response = await getGeminiResponse(history, plan);
+      await decrementCredits(); 
 
       let assistantContent = response.text || '';
       let isAction = false;
@@ -591,7 +646,8 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
                   ? `VOICE: ${voiceStatus}`
                   : isPro
                   ? 'PRO ACCESS'
-                  : `${Math.max(0, 20 - getDailyMessageCount())} CREDITS`}
+                  : `${Math.max(0, credits ?? 0)} CREDITS`}
+
               </span>
             </div>
             <div className="text-[8px] text-slate-300 font-black uppercase tracking-widest mt-1">
