@@ -787,14 +787,6 @@ const App: React.FC = () => {
         />
 
         {/* fallback */}
-        <Route
-  path="*"
-  element={
-    session
-      ? <Navigate to="/app/chat" replace />
-      : <Navigate to="/login" replace />
-  }
-/>
       </Routes>
     </BrowserRouter>
   );
