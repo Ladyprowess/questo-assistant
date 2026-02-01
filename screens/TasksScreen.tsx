@@ -4,15 +4,26 @@ import { Task } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../services/supabase';
 
+// ✅ CHANGE THIS IMPORT PATH if your file name/location differs
+import { pushAllToGoogleCalendar } from '../services/gemini';
+
 interface TasksScreenProps {
   plan: string;
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   addAction: (type: string, input: any) => void;
-  syncToCalendar: (title: string, date: string | null) => void;
+
+  // kept optional so your current app won’t break if it still passes it
+  syncToCalendar?: (title: string, date: string | null) => void;
 }
 
-const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAction, syncToCalendar }) => {
+const TasksScreen: React.FC<TasksScreenProps> = ({
+  plan,
+  tasks,
+  setTasks,
+  addAction,
+  syncToCalendar, // legacy
+}) => {
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -27,7 +38,6 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
 
   /**
    * TIMEZONE: Use user timezone for parsing+display.
-   * Try localStorage, then fallback to browser timezone.
    */
   const userTimeZone = useMemo(() => {
     const fromStorage =
@@ -52,8 +62,6 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
   /**
    * Convert datetime-local (YYYY-MM-DDTHH:mm) representing a time in userTimeZone
    * into a UTC ISO string for storage.
-   *
-   * This prevents the 1hr (or more) shift bug.
    */
   const datetimeLocalToUtcIso = (datetimeLocal: string, tz: string) => {
     if (!datetimeLocal) return new Date().toISOString();
@@ -124,7 +132,6 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
 
   /**
    * Convert stored UTC ISO -> datetime-local string in userTimeZone ("YYYY-MM-DDTHH:mm")
-   * so the edit form shows the correct local time.
    */
   const utcIsoToDatetimeLocalInTz = (iso?: string | null) => {
     if (!iso) return '';
@@ -155,6 +162,64 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
     }
   };
 
+  /**
+   * ✅ Convert task recurrence to Google Calendar RRULE
+   * Your DB stores recurring_rule like "FREQ=DAILY" etc.
+   */
+  const toRRule = (recurring: string) => {
+    if (!recurring || recurring === 'none') return '';
+    const freq = recurring.toUpperCase();
+
+    if (freq === 'DAILY') return 'RRULE:FREQ=DAILY';
+    if (freq === 'WEEKLY') return 'RRULE:FREQ=WEEKLY';
+    if (freq === 'MONTHLY') return 'RRULE:FREQ=MONTHLY';
+
+    return '';
+  };
+
+  /**
+   * ✅ Pro: sync a single task to Google Calendar
+   * Uses pushAllToGoogleCalendar({ tasks:[...] }) so we don’t need another helper.
+   */
+  const syncSingleTaskToGoogle = async (task: Task) => {
+    if (!isPro) return;
+
+    const recurringValue =
+      task.recurring_rule?.includes('=') ? task.recurring_rule.split('=')[1] : '';
+
+    const rrule = recurringValue ? toRRule(recurringValue.toLowerCase()) : '';
+
+    try {
+      await pushAllToGoogleCalendar({
+        tasks: [
+          {
+            id: task.id,
+            uuid: (task as any).uuid,
+            title: task.title,
+            description: task.description || 'Action Item',
+            due_at: task.due_at || new Date().toISOString(),
+            priority: (task as any).priority || 'medium',
+            recurrence: rrule || undefined,
+          } as any,
+        ],
+      });
+
+      showToast('success', 'Saved. Task synced to Google Calendar.');
+    } catch (e: any) {
+      // legacy fallback (won’t truly sync)
+      try {
+        if (syncToCalendar) syncToCalendar(task.title, task.due_at || null);
+      } catch {}
+
+      showToast(
+        'info',
+        e?.message
+          ? `Saved. Google sync failed: ${e.message}`
+          : 'Saved. Could not sync to Google Calendar right now.'
+      );
+    }
+  };
+
   const toggleStatus = async (task: Task, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -173,7 +238,6 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
       if (data) {
         setTasks(prev => prev.map(t => (t.id === task.id ? data : t)));
         addAction('toggle_task', { id: task.id });
-
         showToast('success', newStatus === 'done' ? 'Nice. Task marked as done.' : 'Okay. Task moved back to To-Do.');
       }
     } catch (err: any) {
@@ -188,7 +252,7 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
       return;
     }
 
-    // Pro gating for recurrence (feature lock)
+    // Pro gating for recurrence
     if (formTask.recurring !== 'none' && !isPro) {
       showToast('info', 'Recurring tasks are a Pro feature. Upgrade to Pro to use recurrence.');
       navigate('/paywall');
@@ -210,13 +274,16 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
         ? datetimeLocalToUtcIso(formTask.due_at, userTimeZone)
         : new Date().toISOString();
 
+      const recurringRuleDb =
+        formTask.recurring !== 'none' ? `FREQ=${formTask.recurring.toUpperCase()}` : null;
+
       if (isEditing && selectedTask) {
         const { data, error } = await supabase
           .from('tasks')
           .update({
             title: formTask.title,
             due_at: taskDueUtcIso,
-            recurring_rule: formTask.recurring !== 'none' ? `FREQ=${formTask.recurring.toUpperCase()}` : null,
+            recurring_rule: recurringRuleDb,
             updated_at: new Date().toISOString(),
           })
           .eq('id', selectedTask.id)
@@ -230,13 +297,8 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
           addAction('manual_task_update', { id: selectedTask.id });
           showToast('success', 'Updated. Your task has been saved.');
 
-          // Pro-only: sync tasks to Google Calendar
           if (isPro) {
-            try {
-              syncToCalendar(formTask.title, taskDueUtcIso);
-            } catch {
-              // Don't fail task save if sync fails
-            }
+            await syncSingleTaskToGoogle(data);
           } else {
             showToast('info', 'Saved. Upgrade to Pro to sync tasks to Google Calendar and get reminders.');
           }
@@ -251,7 +313,7 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
             due_at: taskDueUtcIso,
             priority: 'medium',
             status: 'todo',
-            recurring_rule: formTask.recurring !== 'none' ? `FREQ=${formTask.recurring.toUpperCase()}` : null,
+            recurring_rule: recurringRuleDb,
           }])
           .select()
           .single();
@@ -263,13 +325,8 @@ const TasksScreen: React.FC<TasksScreenProps> = ({ plan, tasks, setTasks, addAct
           addAction('manual_task_create', { title: formTask.title });
           showToast('success', 'Saved. Your task has been added to Tasks.');
 
-          // Pro-only: sync tasks to Google Calendar
           if (isPro) {
-            try {
-              syncToCalendar(formTask.title, taskDueUtcIso);
-            } catch {
-              // ignore sync failure for now
-            }
+            await syncSingleTaskToGoogle(data);
           } else {
             showToast('info', 'Saved. Upgrade to Pro to sync tasks to Google Calendar and get reminders.');
           }

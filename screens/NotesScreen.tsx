@@ -3,12 +3,17 @@ import { ICONS, COLORS } from '../constants';
 import { Note } from '../types';
 import { supabase } from '../services/supabase';
 
+// ✅ CHANGE THIS IMPORT PATH if your file name/location differs
+import { pushAllToGoogleCalendar } from '../services/gemini';
+
 type Props = {
   plan: string;
   notes: Note[];
   setNotes: any;
   addAction: (t: string, i: any) => void;
-  syncToCalendar: (title: string, date: string | null) => void;
+
+  // keep optional (legacy)
+  syncToCalendar?: (title: string, date: string | null) => void;
 };
 
 const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncToCalendar }) => {
@@ -25,7 +30,6 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
 
   /**
    * TIMEZONE: We must format timestamps consistently using the user's timezone.
-   * We try localStorage keys, then fallback to browser timezone.
    */
   const userTimeZone = useMemo(() => {
     const fromStorage =
@@ -38,7 +42,6 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
     const tz = fromStorage?.trim();
     if (tz) return tz;
 
-    // Browser fallback
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   }, []);
 
@@ -49,8 +52,7 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
   };
 
   /**
-   * Format a UTC ISO date using the user timezone (not the laptop timezone).
-   * This fixes “5pm shows 4pm” when the machine TZ differs from user TZ.
+   * Format a UTC ISO date using the user timezone
    */
   const formatInTz = (iso: string, withDate = true) => {
     try {
@@ -92,18 +94,11 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
   };
 
   /**
-   * Convert a datetime-local string (e.g. "2026-02-01T17:00")
-   * which represents a time in userTimeZone → UTC ISO string for storage.
-   *
-   * Why: datetime-local has no timezone. If we store it wrongly,
-   * it shifts by 1hr or more depending on the machine TZ.
+   * Convert datetime-local in userTimeZone -> UTC ISO
    */
   const datetimeLocalToUtcIso = (datetimeLocal: string, tz: string) => {
-    // If empty, just use now
     if (!datetimeLocal) return new Date().toISOString();
 
-    // Parse local parts
-    // format: YYYY-MM-DDTHH:mm
     const [datePart, timePart] = datetimeLocal.split('T');
     if (!datePart || !timePart) return new Date().toISOString();
 
@@ -112,11 +107,8 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
 
     if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return new Date().toISOString();
 
-    // Start with a UTC guess
     let guess = new Date(Date.UTC(y, m - 1, d, hh, mm, 0));
 
-    // We want: when guess is formatted in tz, it matches y-m-d hh:mm.
-    // We'll adjust using the difference between desired and formatted parts.
     const getPartsInTz = (date: Date) => {
       const parts = new Intl.DateTimeFormat('en-GB', {
         timeZone: tz,
@@ -140,11 +132,8 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
 
     const desired = { year: y, month: m, day: d, hour: hh, minute: mm };
 
-    // Adjust twice for stability (handles DST/timezone offsets)
     for (let i = 0; i < 2; i++) {
       const got = getPartsInTz(guess);
-
-      // Convert both to "minutes from epoch-like" in a comparable way
       const desiredMinutes = Date.UTC(desired.year, desired.month - 1, desired.day, desired.hour, desired.minute) / 60000;
       const gotMinutes = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute) / 60000;
 
@@ -155,6 +144,51 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
     }
 
     return guess.toISOString();
+  };
+
+  /**
+   * ✅ Pro: sync a single NOTE to Google Calendar
+   * Only sync if the note has a scheduled time.
+   */
+  const syncSingleNoteToGoogle = async (note: Note) => {
+    if (!isPro) return;
+
+    // Only scheduled notes should create calendar reminders
+    if (!note.scheduled_at) return;
+
+    try {
+      // Make note appear as a calendar event (short 30min block)
+      const start = note.scheduled_at;
+      const end = new Date(new Date(start).getTime() + 30 * 60 * 1000).toISOString();
+
+      await pushAllToGoogleCalendar({
+        events: [
+          {
+            id: note.id,
+            uuid: (note as any).uuid,
+            title: `Note: ${note.title}`,
+            start_at: start,
+            end_at: end,
+            location: '',
+            description: note.content || '',
+          } as any,
+        ],
+      });
+
+      showToast('success', 'Saved. Note synced to Google Calendar.');
+    } catch (e: any) {
+      // legacy fallback
+      try {
+        if (syncToCalendar) syncToCalendar(`Note: ${note.title}`, note.scheduled_at || null);
+      } catch {}
+
+      showToast(
+        'info',
+        e?.message
+          ? `Saved. Google sync failed: ${e.message}`
+          : 'Saved. Could not sync to Google Calendar right now.'
+      );
+    }
   };
 
   const handleSaveNote = async () => {
@@ -175,9 +209,12 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
         return;
       }
 
-      const noteTimeUtcIso = formNote.scheduled_at
+      // IMPORTANT:
+      // If user sets a schedule, store it.
+      // If they leave it empty, store NULL (so we don’t accidentally sync “now”)
+      const scheduledUtcIso = formNote.scheduled_at
         ? datetimeLocalToUtcIso(formNote.scheduled_at, userTimeZone)
-        : new Date().toISOString();
+        : null;
 
       if (isEditing && selectedNote) {
         const { data, error } = await supabase
@@ -185,7 +222,7 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
           .update({
             title: formNote.title,
             content: formNote.content,
-            scheduled_at: noteTimeUtcIso,
+            scheduled_at: scheduledUtcIso,
             updated_at: new Date().toISOString(),
           })
           .eq('id', selectedNote.id)
@@ -199,15 +236,15 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
           addAction('manual_note_update', { id: selectedNote.id });
           showToast('success', 'Updated. Your note has been saved successfully.');
 
-          // Pro-only calendar sync
           if (isPro) {
-            try {
-              syncToCalendar(`Note: ${formNote.title}`, noteTimeUtcIso);
-            } catch {
-              // don’t break the save flow
+            // only scheduled notes sync
+            if (data.scheduled_at) {
+              await syncSingleNoteToGoogle(data);
+            } else {
+              showToast('info', 'Saved. Add a scheduled time to sync this note to Google Calendar.');
             }
           } else {
-            showToast('info', 'Saved. Upgrade to Pro to sync notes to Google Calendar.');
+            showToast('info', 'Saved. Upgrade to Pro to sync scheduled notes to Google Calendar.');
           }
         }
       } else {
@@ -217,7 +254,7 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
             user_id: user.id,
             title: formNote.title,
             content: formNote.content,
-            scheduled_at: noteTimeUtcIso,
+            scheduled_at: scheduledUtcIso,
           }])
           .select()
           .single();
@@ -229,15 +266,14 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
           addAction('manual_note_create', { title: formNote.title });
           showToast('success', 'Saved. Your note has been added to Notes.');
 
-          // Pro-only calendar sync
           if (isPro) {
-            try {
-              syncToCalendar(`Note: ${formNote.title}`, noteTimeUtcIso);
-            } catch {
-              // don’t break the save flow
+            if (data.scheduled_at) {
+              await syncSingleNoteToGoogle(data);
+            } else {
+              showToast('info', 'Saved. Add a scheduled time to sync this note to Google Calendar.');
             }
           } else {
-            showToast('info', 'Saved. Upgrade to Pro to sync notes to Google Calendar.');
+            showToast('info', 'Saved. Upgrade to Pro to sync scheduled notes to Google Calendar.');
           }
         }
       }
@@ -372,8 +408,7 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
                 onClick={() => {
                   setIsEditing(true);
 
-                  // Convert stored UTC ISO → datetime-local string in userTimeZone (for editing)
-                  // We'll generate a "YYYY-MM-DDTHH:mm" string.
+                  // Convert stored UTC ISO → datetime-local string in userTimeZone
                   const iso = selectedNote.scheduled_at || selectedNote.created_at;
                   let dtLocal = '';
                   try {
@@ -475,10 +510,14 @@ const NotesScreen: React.FC<Props> = ({ plan, notes, setNotes, addAction, syncTo
                 )}
               </button>
 
-              {/* Pro hint */}
               {!isPro && (
                 <p className="text-xs text-slate-400 font-semibold text-center">
                   Upgrade to Pro to sync notes to Google Calendar and receive Google reminders.
+                </p>
+              )}
+              {isPro && (
+                <p className="text-[11px] text-slate-400 font-semibold text-center">
+                  Tip: Add a scheduled time to sync this note to Google Calendar.
                 </p>
               )}
             </div>

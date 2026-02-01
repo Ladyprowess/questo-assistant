@@ -3,6 +3,9 @@ import { ICONS, COLORS } from '../constants';
 import { CalendarEvent } from '../types';
 import { supabase } from '../services/supabase';
 
+// ✅ CHANGE THIS IMPORT PATH if your file name/location differs
+import { pushAllToGoogleCalendar } from '../services/gemini';
+
 interface CalendarScreenProps {
   events: CalendarEvent[];
   setEvents: React.Dispatch<React.SetStateAction<CalendarEvent[]>>;
@@ -10,7 +13,7 @@ interface CalendarScreenProps {
 
   // Optional (so your current app won’t break)
   plan?: string;
-  syncToCalendar?: (title: string, date: string | null) => void;
+  syncToCalendar?: (title: string, date: string | null) => void; // legacy
 }
 
 const CalendarScreen: React.FC<CalendarScreenProps> = ({
@@ -26,6 +29,9 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
   // UI feedback
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // ✅ Sync state (so button can show loading)
+  const [syncing, setSyncing] = useState(false);
 
   const isPro = useMemo(() => (plan || '').toLowerCase() === 'pro', [plan]);
 
@@ -160,7 +166,7 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
           eventMap.set(key, { ...existing, isSynced: true });
         }
       } else {
-        eventMap.set(key, { ...e, isSynced: e.source === 'google_calendar' });
+        eventMap.set(key, { ...e, isSynced: e.source === 'google_calendar' || e.isSynced });
       }
     });
 
@@ -168,6 +174,54 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
       (a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()
     );
   }, [events, userTimeZone]);
+
+  /**
+   * ✅ Pro: sync a single event to Google Calendar
+   * Uses pushAllToGoogleCalendar({ events:[event] }) so you don’t need extra helper functions.
+   */
+  const syncSingleEventToGoogle = async (event: CalendarEvent) => {
+    if (!isPro) return;
+
+    // If old apps still pass syncToCalendar, we keep it as a fallback.
+    // But our main logic is the real Google Calendar sync helper.
+    try {
+      setSyncing(true);
+
+      await pushAllToGoogleCalendar({
+        events: [
+          {
+            id: event.id,
+            uuid: (event as any).uuid,
+            title: event.title,
+            start_at: event.start_at,
+            end_at: event.end_at,
+            location: event.location,
+          },
+        ],
+      });
+
+      // Mark locally as synced for UI
+      setEvents(prev =>
+        prev.map(e => (e.id === event.id ? { ...e, isSynced: true } : e))
+      );
+
+      showToast('success', 'Saved. Event synced to Google Calendar.');
+    } catch (e: any) {
+      // fallback to legacy prop if present (won’t really sync, but keeps older behaviour)
+      try {
+        if (syncToCalendar) syncToCalendar(event.title, event.start_at);
+      } catch {}
+
+      showToast(
+        'info',
+        e?.message
+          ? `Saved. Google sync failed: ${e.message}`
+          : 'Saved. Could not sync to Google Calendar right now.'
+      );
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleManualCreate = async () => {
     if (!newEvent.title.trim() || !newEvent.start_at) {
@@ -201,32 +255,29 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
         source: 'internal',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      };
+        // local UI flag
+        isSynced: false as any,
+      } as any;
 
       setEvents(prev => [event, ...prev]);
       addAction('manual_event_create', { title: event.title });
 
-      // Pro-only Google sync
-      if (isPro && syncToCalendar) {
-        try {
-          syncToCalendar(event.title, event.start_at);
-          showToast('success', 'Saved. Event added and synced to your calendar.');
-        } catch {
-          showToast('info', 'Saved. Could not sync to Google Calendar right now.');
-        }
+      // ✅ Pro-only Google sync (REAL)
+      if (isPro) {
+        await syncSingleEventToGoogle(event);
       } else {
-        // Saved locally; pro hint
         showToast('success', 'Saved. Your event has been added to Calendar.');
-        if (!isPro) {
-          showToast('info', 'Upgrade to Pro to sync events to Google Calendar and receive Google reminders.');
-        }
+        showToast('info', 'Upgrade to Pro to sync events to Google Calendar and receive Google reminders.');
       }
 
       setIsCreating(false);
       setNewEvent({ title: '', start_at: '', end_at: '', location: '' });
     } catch (err: any) {
       console.error(err);
-      showToast('error', err?.message ? `Could not create event: ${err.message}` : 'Could not create event. Please try again.');
+      showToast(
+        'error',
+        err?.message ? `Could not create event: ${err.message}` : 'Could not create event. Please try again.'
+      );
     }
   };
 
@@ -265,7 +316,7 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
         </button>
       </header>
 
-      {/* AI Daily Pulse card (kept, but made dynamic) */}
+      {/* AI Daily Pulse card */}
       <div className="mb-8 p-6 bg-white border border-slate-100 rounded-[32px] shadow-sm flex items-center space-x-4">
         <div className="w-12 h-12 bg-teal-50 rounded-2xl flex items-center justify-center text-teal-600 shrink-0">
           <ICONS.Calendar className="w-6 h-6" />
@@ -273,7 +324,8 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
         <div className="flex-1">
           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">AI Daily Pulse</p>
           <p className="text-xs text-slate-700 font-bold leading-relaxed">
-            You have {dedupedEvents.length} items currently logged. Times display in <span className="text-teal-600 underline">{userTimeZone}</span>.
+            You have {dedupedEvents.length} items currently logged. Times display in{' '}
+            <span className="text-teal-600 underline">{userTimeZone}</span>.
           </p>
         </div>
       </div>
@@ -307,7 +359,7 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
                   </h4>
                   <div className="flex items-center space-x-2 mt-1">
                     <p className="text-xs text-slate-400 line-clamp-1">{event.location || 'Meeting'}</p>
-                    {event.isSynced && (
+                    {(event.isSynced || event.source === 'google_calendar') && (
                       <span className="bg-teal-50 text-teal-600 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">
                         G-Sync
                       </span>
@@ -370,15 +422,24 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
 
               <button
                 onClick={handleManualCreate}
-                className="w-full py-4 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all"
+                disabled={syncing}
+                className={`w-full py-4 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all ${
+                  syncing ? 'opacity-60 cursor-not-allowed' : ''
+                }`}
                 style={{ backgroundColor: COLORS.primary }}
               >
-                {isPro ? 'Save & Sync' : 'Save Event'}
+                {isPro ? (syncing ? 'Saving & Syncing…' : 'Save & Sync') : 'Save Event'}
               </button>
 
               {!isPro && (
                 <p className="text-xs text-slate-400 font-semibold text-center">
                   Upgrade to Pro to sync events to Google Calendar and receive Google reminders.
+                </p>
+              )}
+
+              {isPro && (
+                <p className="text-[11px] text-slate-400 font-semibold text-center">
+                  Pro sync will ask for Google permission the first time only.
                 </p>
               )}
             </div>
@@ -393,7 +454,7 @@ const CalendarScreen: React.FC<CalendarScreenProps> = ({
               <div className="flex-1 pr-4">
                 <h2 className="text-2xl font-black text-slate-800 leading-tight">{selectedEvent.title}</h2>
                 <div className="mt-2 flex items-center text-[10px] font-black uppercase text-teal-600 tracking-widest">
-                  {selectedEvent.isSynced ? 'Synchronized Entry' : 'Local Entry'}
+                  {selectedEvent.isSynced || selectedEvent.source === 'google_calendar' ? 'Synchronized Entry' : 'Local Entry'}
                 </div>
               </div>
 
