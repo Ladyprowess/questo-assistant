@@ -742,7 +742,10 @@ const App: React.FC = () => {
         {/* ✅ PUBLIC ROUTES (NO LOGIN REQUIRED) */}
         <Route path="/" element={<LandingScreen />} />
         <Route path="/privacy" element={<PrivacyScreen />} />
-        <Route path="/login" element={<AuthScreen onAuthStarted={() => setIsInitializing(true)} />} />
+        <Route
+  path="/login"
+  element={session ? <Navigate to="/app/chat" replace /> : <AuthScreen onAuthStarted={() => setIsInitializing(true)} />}
+/>
 
         {/* ✅ PRIVATE APP ROUTES */}
         <Route
