@@ -14,6 +14,7 @@ interface Message {
   timestamp: Date;
   isAction?: boolean;
   draftId?: string;
+  actionType?: string;
 }
 
 function encode(bytes: Uint8Array) {
@@ -142,8 +143,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         
         if (data) {
           syncToCalendar(args.title, args.due_at);
-          triggerNotification("Ledger Updated", `Task: ${args.title}`);
+          triggerNotification("Task Created", args.title);
           resultPayload = { status: 'success', id: data.id };
+          await addAction(name, args, resultPayload);
+          await refreshData();
+          return { result: "Task created." };
         } else if (error) throw error;
       }
 
@@ -157,8 +161,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
 
         if (data) {
           syncToCalendar(`Note: ${args.title}`, args.scheduled_at);
-          triggerNotification("Intelligence Saved", args.title);
+          triggerNotification("Note Saved", args.title);
           resultPayload = { status: 'success', id: data.id };
+          await addAction(name, args, resultPayload);
+          await refreshData();
+          return { result: "Note saved." };
         } else if (error) throw error;
       }
 
@@ -172,8 +179,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         }]).select().single();
 
         if (data) {
-          triggerNotification("Calendar Event Locked", args.title);
+          triggerNotification("Event Scheduled", args.title);
           resultPayload = { status: 'success', id: data.id };
+          await addAction(name, args, resultPayload);
+          await refreshData();
+          return { result: "Event scheduled." };
         } else if (error) throw error;
       }
 
@@ -190,16 +200,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
           resultPayload = { status: 'success', id: data.id };
           await addAction(name, args, resultPayload);
           await refreshData();
-          return { result: "Draft created successfully.", draftId: data.id };
+          return { result: "Draft created.", draftId: data.id };
         } else if (error) throw error;
       }
 
       await addAction(name, args, resultPayload);
       await refreshData();
-      return { result: "The record has been permanently saved to your cloud ledger." };
+      return { result: "Action completed." };
     } catch (e: any) {
       console.error(`[LEDGER ERROR] ${name}:`, e);
-      triggerNotification("Cloud Save Failed", e.message || "Unknown DB Error");
+      triggerNotification("Action Failed", e.message || "Cloud error");
       await addAction(name, args, { status: 'error', message: e.message });
       return { error: `Database rejection: ${e.message}` };
     }
@@ -329,38 +339,54 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
     if (!input.trim() || isLoading) return;
     if (plan === 'free' && getDailyMessageCount() >= 20) { navigate('/paywall'); return; }
     
-    const userMessage: Message = { id: `u-${Date.now()}`, role: 'user', content: input.trim(), timestamp: new Date() };
+    const userMessage: Message = { 
+      id: `u-${Date.now()}`, 
+      role: 'user', 
+      content: input.trim(), 
+      timestamp: new Date() 
+    };
+    
     setMessages(prev => [...prev, userMessage]);
+    
     const currentInput = input; 
     setInput(''); 
     setIsLoading(true); 
     incrementMessageCount();
 
     try {
-      const history = messages.slice(-10).map(m => ({ role: m.role, content: m.content }));
-      history.push({ role: 'user', content: currentInput.trim() });
+      const history = [...messages, userMessage].slice(-10).map(m => ({ 
+        role: m.role, 
+        content: m.content 
+      }));
       
       const response = await getGeminiResponse(history, plan);
       let assistantContent = response.text || '';
       let isAction = false; 
       let draftId = undefined;
+      let actionResults: string[] = [];
       
       if (response.functionCalls && response.functionCalls.length > 0) {
         for (const fc of response.functionCalls) {
           const res: any = await executeFunction(fc.name, fc.args);
           isAction = true; 
+          if (res?.result) actionResults.push(res.result);
           if (res?.draftId) draftId = res.draftId;
         }
       }
       
       const assistantMessage: Message = {
-        id: `a-${Date.now()}`, role: 'assistant',
-        content: cleanResponse(assistantContent) || (isAction ? "I've processed your request and synchronized the ledger." : "I'm having trouble syncing that right now."),
-        timestamp: new Date(), isAction, draftId
+        id: `a-${Date.now()}`, 
+        role: 'assistant',
+        content: cleanResponse(assistantContent) || (isAction ? (actionResults.join(' ') || "Success.") : "Processed."),
+        timestamp: new Date(), 
+        isAction, 
+        draftId
       };
+      
       setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) { 
-      triggerNotification("Assistant Offline", "Communication with the cloud lost."); 
+    } catch (error: any) { 
+      console.error("Gemini API Error:", error);
+      triggerNotification("Assistant Offline", `Connection failed: ${error.message || 'Check network'}`); 
     } finally { 
       setIsLoading(false); 
     }
@@ -384,7 +410,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({
         {messages.map((msg) => (
           <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             <div className={`max-w-[85%] px-5 py-4 rounded-3xl text-sm shadow-sm transition-all ${msg.role === 'user' ? 'bg-slate-800 text-white rounded-tr-none' : 'bg-white text-slate-700 rounded-tl-none border border-slate-100'}`}>
-              {msg.isAction && <div className="text-[8px] font-black uppercase text-teal-500 mb-1">Database Sync Complete</div>}
+              {msg.isAction && <div className="text-[8px] font-black uppercase text-teal-500 mb-1">Success</div>}
               {msg.content}
               <div className="text-[8px] text-slate-400 mt-1 text-right opacity-60">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
             </div>

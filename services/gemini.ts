@@ -129,8 +129,9 @@ export const getGeminiResponse = async (messages: { role: string; content: strin
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const contents = normalizeHistory(messages);
 
+  // Using gemini-3-flash-preview for better quota availability and lower latency
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3-flash-preview',
     contents,
     config: {
       systemInstruction: getSystemInstruction(plan),
