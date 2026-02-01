@@ -622,7 +622,18 @@ const App: React.FC = () => {
     }
   }, [profile?.plan, fetchAllData, triggerNotification]);
 
-  if (!isSupabaseConfigured) return <SupabaseConfigScreen />;
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-8 text-center">
+        <div>
+          <h1 className="text-2xl font-black mb-2">Missing Supabase Env</h1>
+          <p className="text-slate-300 text-sm">
+            Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isInitializing) {
     return (
