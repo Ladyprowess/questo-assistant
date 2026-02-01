@@ -208,7 +208,7 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          rredirectTo: `${window.location.origin}/login`,
+          redirectTo: `${window.location.origin}/login`,
           queryParams: { access_type: 'offline', prompt: 'consent' },
         },
       });
@@ -366,7 +366,10 @@ const AppShell: React.FC<{
   handleSignOut,
 }) => {
   return (
-    <div className="flex flex-col h-screen bg-slate-50 max-w-md mx-auto relative border-x border-slate-200 shadow-2xl overflow-hidden">
+    <div
+  className="flex flex-col bg-slate-50 max-w-md mx-auto relative border-x border-slate-200 shadow-2xl overflow-hidden"
+  style={{ height: '100dvh' }}
+>
       {notification && (
         <div className="absolute top-6 left-4 right-4 z-[200] animate-in slide-in-from-top-12 duration-500">
           <div className="bg-white/95 backdrop-blur-xl border border-slate-200 p-4 rounded-3xl shadow-2xl flex items-center space-x-4">
@@ -381,7 +384,7 @@ const AppShell: React.FC<{
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto pb-32 scroll-smooth">
+      <main className="flex-1 overflow-y-auto pb-20 scroll-smooth">
         <Routes>
           <Route
             path="chat"
@@ -478,7 +481,7 @@ const AppShell: React.FC<{
         )}
       </main>
 
-      <nav className="absolute bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 flex items-center justify-around px-6 pt-3 pb-[calc(env(safe-area-inset-bottom,0px)+16px)] z-50">
+      <nav className="sticky bottom-0 bg-white/95 backdrop-blur-xl border-t border-slate-200 flex items-center justify-around px-6 py-4 z-50">
         <NavItem to="/app/chat" icon={<ICONS.Chat className="w-6 h-6" />} label="Assistant" />
         <NavItem to="/app/today" icon={<ICONS.Today className="w-6 h-6" />} label="Schedule" />
         <NavItem to="/app/tasks" icon={<ICONS.Tasks className="w-6 h-6" />} label="Tasks" />
