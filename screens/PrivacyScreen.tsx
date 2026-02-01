@@ -86,7 +86,7 @@ const PrivacyScreen: React.FC = () => {
             </h2>
             <p className="mt-3 text-sm text-slate-700 leading-relaxed">
               If you sign in with Google, Google processes sign-in information as part of authentication.
-              If calendar sync is enabled for Pro users, permissions are only used to create or update events you approve.
+              If calendar sync is enabled, permissions are only used to create or update events you approve.
             </p>
           </section>
 

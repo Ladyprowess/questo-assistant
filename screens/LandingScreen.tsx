@@ -52,8 +52,7 @@ const LandingScreen: React.FC = () => {
           </h2>
 
           <p className="text-slate-600 mt-4 text-sm leading-relaxed">
-            Queso Assistant helps you write message suggestions, save notes, and manage tasks in one place.
-            Sign in to access your personal workspace.
+          Queso Assistant is a personal AI virtual assistant built to help individuals stay organised, focused, and in control of their daily lives.
           </p>
 
           {/* Primary actions */}
@@ -79,16 +78,18 @@ const LandingScreen: React.FC = () => {
             <div className="p-5 rounded-3xl bg-slate-50 border border-slate-100">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">What you can do</p>
               <ul className="mt-3 text-sm text-slate-700 space-y-2">
-                <li>• Draft message suggestions (full drafts can be Pro).</li>
-                <li>• Save tasks, notes, and reminders.</li>
-                <li>• Keep everything synced to your account.</li>
+                <li>• Record tasks using your voice.</li>
+                <li>• Turn spoken notes into tasks and reminders.</li>
+                <li>• Sync tasks automatically with your calendar.</li>
+                <li>• Receive timely reminders for important plans.</li>
+                <li>• Help you craft emails and messages quickly.</li>
               </ul>
             </div>
 
             <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Made for focus</p>
               <p className="mt-3 text-sm text-slate-700 leading-relaxed">
-                Simple, private, and built to feel like a pocket assistant — not another noisy app.
+              Simple, calm, and reliable. Helps you stay organised without noise, pressure, or distractions.
               </p>
             </div>
           </div>
