@@ -80,7 +80,7 @@ const SettingsScreen: React.FC<{ profile: any; setProfile: any; onSignOut: () =>
           onClick={onSignOut}
           className="w-full py-5 text-red-500 font-black text-xs uppercase tracking-widest bg-red-50 rounded-2xl mt-4 border border-red-100 active:scale-95 transition-all shadow-sm"
         >
-          Deauthorize Account
+          Sign Out
         </button>
       </div>
 
