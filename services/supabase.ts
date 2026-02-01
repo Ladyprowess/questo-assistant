@@ -2,12 +2,12 @@ import { createClient } from '@supabase/supabase-js';
 
 const getSupabaseConfig = () => {
   const url =
-    (import.meta as any)?.env?.VITE_SUPABASE_URL ||
+    import.meta.env.VITE_SUPABASE_URL ||
     localStorage.getItem('QUESO_SUPABASE_URL') ||
     '';
 
   const key =
-    (import.meta as any)?.env?.VITE_SUPABASE_ANON_KEY ||
+    import.meta.env.VITE_SUPABASE_ANON_KEY ||
     localStorage.getItem('QUESO_SUPABASE_KEY') ||
     '';
 
