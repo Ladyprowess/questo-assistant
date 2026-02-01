@@ -208,7 +208,7 @@ const AuthScreen: React.FC<{ onAuthStarted: () => void }> = ({ onAuthStarted }) 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin,
+          rredirectTo: `${window.location.origin}/login`,
           queryParams: { access_type: 'offline', prompt: 'consent' },
         },
       });
@@ -744,7 +744,11 @@ const App: React.FC = () => {
         <Route path="/privacy" element={<PrivacyScreen />} />
         <Route
   path="/login"
-  element={session ? <Navigate to="/app/chat" replace /> : <AuthScreen onAuthStarted={() => setIsInitializing(true)} />}
+  element={
+    session
+      ? <Navigate to="/app/chat" replace />
+      : <AuthScreen onAuthStarted={() => setIsInitializing(true)} />
+  }
 />
 
         {/* ✅ PRIVATE APP ROUTES */}
