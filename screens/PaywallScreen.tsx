@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { ICONS, COLORS } from "../constants";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../services/supabase";
+
 
 // ✅ CHANGE THIS IMPORT PATH to where you placed the Google Calendar sync helpers
 // It should point to the file you dropped earlier (the Gemini tools file).
@@ -84,56 +86,64 @@ const PaywallScreen: React.FC<PaywallProps> = ({ profile, setProfile }) => {
 
   const handleSubscribe = async () => {
     const platform = isNigerian ? "Paystack" : "PayPal";
-
-    const confirmMsg =
-      profile.plan === "pro"
-        ? `Redirecting to ${platform} to update your payment method...`
-        : `Redirecting to ${platform} for secure checkout...`;
-
-    alert(confirmMsg);
-
-    // Keep your simulation, but after “success” we now sync to Google Calendar (PRO only)
+  
+    alert(`Redirecting to ${platform} for secure checkout...`);
+  
+    // simulate payment success
     setTimeout(async () => {
       try {
         setSyncError("");
         setSyncingToGoogle(true);
-
-        // ✅ Mark user as PRO first
+  
+        // 🔐 get logged-in user
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("User not authenticated");
+  
+        // ✅ 1. UPDATE SUPABASE (THIS IS THE REAL PRO SWITCH)
+        await supabase
+          .from("profiles")
+          .update({ plan: "pro" })
+          .eq("id", user.id);
+  
+        await supabase
+          .from("subscriptions")
+          .upsert({
+            user_id: user.id,
+            plan: "pro",
+            status: "active",
+          });
+  
+        // ✅ 2. UPDATE LOCAL UI STATE
         const nextProfile = { ...profile, plan: "pro" };
         setProfile(nextProfile);
-
-        // ✅ Now push ALL existing items to Google Calendar
-        // This will prompt the user to connect Google if they haven't.
+  
+        // ✅ 3. OPTIONAL: SYNC EXISTING DATA TO GOOGLE CALENDAR
         const payload = loadLocalDataForSync();
-
         const result = await pushAllToGoogleCalendar(payload);
-
+  
         setSyncingToGoogle(false);
-
+  
         alert(
-          `Success! Your Queso Pro ${billingCycle} plan is now active.\n\nGoogle Calendar Sync complete:\n• Calendar: ${result.calendarId}\n• Synced: ${result.synced} item(s)`
+          `Success! Queso Pro is now active.\n\nGoogle Calendar synced:\n• ${result.synced} item(s)`
         );
-
+  
         navigate("/settings");
       } catch (e: any) {
         setSyncingToGoogle(false);
-
+  
         const msg =
           e?.message ||
-          "We couldn’t sync to Google Calendar. Please try again from Settings > Google Calendar Sync.";
-
-        setSyncError(msg);
-
-        // Still activate Pro, but tell them sync failed
+          "Subscription succeeded but Google Calendar sync failed.";
+  
+        // still activate PRO locally
         setProfile({ ...profile, plan: "pro" });
-        alert(
-          `Success! Your Queso Pro ${billingCycle} plan is now active.\n\nBut Google Calendar sync failed:\n${msg}`
-        );
-
+  
+        alert(msg);
         navigate("/settings");
       }
     }, 1200);
   };
+  
 
   return (
     <div className="p-8 bg-slate-900 min-h-full text-white pb-32">
